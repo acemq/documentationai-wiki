@@ -1,0 +1,113 @@
+name: Sync RabbitMQ Upstream Docs
+
+on:
+  schedule:
+    # Every Monday at 9am UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (show changes but do not commit)'
+        type: boolean
+        default: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout wiki repo
+        uses: actions/checkout@v4
+
+      - name: Clone upstream RabbitMQ website
+        run: |
+          git clone --depth=1 https://github.com/rabbitmq/rabbitmq-website.git /tmp/rabbitmq-website
+
+      - name: Read last synced commit
+        id: last_commit
+        run: |
+          LAST=$(jq -r '.last_synced_commit' upstream-source/SYNC_STATE.json)
+          echo "last_commit=$LAST" >> $GITHUB_OUTPUT
+          echo "Last synced: $LAST"
+
+      - name: Get current upstream commit
+        id: current_commit
+        run: |
+          CURRENT=$(git -C /tmp/rabbitmq-website rev-parse HEAD)
+          echo "current_commit=$CURRENT" >> $GITHUB_OUTPUT
+          echo "Current upstream: $CURRENT"
+
+      - name: Check for changes
+        id: changes
+        run: |
+          LAST="${{ steps.last_commit.outputs.last_commit }}"
+          CURRENT="${{ steps.current_commit.outputs.current_commit }}"
+          if [ "$LAST" = "$CURRENT" ]; then
+            echo "No changes since last sync."
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected."
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Sync changed docs
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          # Fetch the full history needed to diff
+          git -C /tmp/rabbitmq-website fetch --unshallow 2>/dev/null || true
+
+          LAST="${{ steps.last_commit.outputs.last_commit }}"
+          CURRENT="${{ steps.current_commit.outputs.current_commit }}"
+
+          echo "Changed docs files:"
+          git -C /tmp/rabbitmq-website diff --name-only "$LAST" "$CURRENT" -- docs/ || \
+            git -C /tmp/rabbitmq-website diff --name-only HEAD~10 HEAD -- docs/
+
+          # Sync the docs directory
+          rsync -av --delete /tmp/rabbitmq-website/docs/ upstream-source/docs/
+
+          # Update sync state
+          DATE=$(date -u +%Y-%m-%d)
+          jq \
+            --arg commit "$CURRENT" \
+            --arg date "$DATE" \
+            '.last_synced_commit = $commit | .last_synced_date = $date' \
+            upstream-source/SYNC_STATE.json > /tmp/sync_state.json
+          mv /tmp/sync_state.json upstream-source/SYNC_STATE.json
+
+      - name: Create summary of changed annotated pages
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          echo "## Upstream Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Synced from rabbitmq/rabbitmq-website commit: ${{ steps.current_commit.outputs.current_commit }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Changed files in upstream-source/docs/" >> $GITHUB_STEP_SUMMARY
+          git diff --name-only HEAD -- upstream-source/docs/ >> $GITHUB_STEP_SUMMARY || echo "First sync" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **Manual step:** Review changed docs and update corresponding annotated .mdx pages if content changed significantly." >> $GITHUB_STEP_SUMMARY
+
+      - name: Commit and push (if not dry run)
+        if: steps.changes.outputs.has_changes == 'true' && inputs.dry_run != true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add upstream-source/
+          git commit -m "chore: sync upstream rabbitmq-website docs to ${{ steps.current_commit.outputs.current_commit }}"
+          git push
+
+      - name: Open issue if changes need annotation review
+        if: steps.changes.outputs.has_changes == 'true' && inputs.dry_run != true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Upstream sync: review annotation updates needed (${new Date().toISOString().split('T')[0]})`,
+              body: `The weekly upstream sync pulled new changes from rabbitmq/rabbitmq-website.\n\n**Action required:** Review the changed files in \`upstream-source/docs/\` and update any corresponding annotated \`.mdx\` pages where the upstream content changed significantly.\n\nSynced to commit: ${{ steps.current_commit.outputs.current_commit }}\n\nSee the [workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for the list of changed files.`,
+              labels: ['upstream-sync', 'needs-review']
+            });
+            console.log(`Created issue #${issue.number}`);
