@@ -1,151 +1,279 @@
 {
-  "name": "Starter Kit",
-  "colors": {
-    "light": {
-      "brand": "#F97316"
-    },
-    "dark": {
-      "brand": "#FDBA74"
-    }
-  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Documentation",
-        "icon": "book",
+        "tab": "00 — Start Here",
+        "icon": "rocket",
         "groups": [
           {
             "group": "Start Here",
-            "icon": "rocket",
             "pages": [
-              {
-                "title": "Introduction",
-                "path": "introduction",
-                "icon": "home"
-              },
-              {
-                "title": "Quickstart",
-                "path": "quickstart",
-                "icon": "zap"
-              },
-              {
-                "title": "Components",
-                "path": "components",
-                "icon": "code"
-              }
-            ]
-          },
-          {
-            "group": "Components",
-            "icon": "layers",
-            "pages": [
-              {
-                "title": "Images",
-                "path": "components/images",
-                "icon": "image"
-              },
-              {
-                "title": "Cards",
-                "path": "components/cards",
-                "icon": "square"
-              },
-              {
-                "title": "Code",
-                "path": "components/code",
-                "icon": "code"
-              },
-              {
-                "title": "Callouts",
-                "path": "components/callouts",
-                "icon": "message-square"
-              },
-              {
-                "title": "Steps",
-                "path": "components/steps",
-                "icon": "list-ordered"
-              },
-              {
-                "title": "Tabs",
-                "path": "components/tabs",
-                "icon": "columns"
-              }
+              {"title": "Attribution & License", "path": "notice"},
+              {"title": "How to Use This KB", "path": "start-here/00-01-how-to-use-this-kb"},
+              {"title": "Version Support & Lifecycle", "path": "start-here/00-02-version-support-lifecycle"},
+              {"title": "Quick Start by Role", "path": "start-here/00-03-quick-start-by-role"},
+              {"title": "Support Tiers & SLA", "path": "start-here/00-04-support-tiers-sla"},
+              {"title": "Glossary", "path": "start-here/00-05-glossary"},
+              {"title": "Tanzu / Broadcom Licensing", "path": "start-here/00-06-tanzu-broadcom-licensing"}
             ]
           }
         ]
       },
       {
-        "tab": "API Reference",
+        "tab": "01 — Core Concepts",
+        "icon": "layers",
+        "groups": [
+          {
+            "group": "Core Concepts",
+            "pages": [
+              {"title": "AMQP 0-9-1 Model", "path": "core-concepts/01-01-amqp-model"},
+              {"title": "Quorum Queues Overview", "path": "core-concepts/01-02-quorum-queues-overview"},
+              {"title": "Raft Consensus Primer", "path": "core-concepts/01-03-raft-consensus-primer"},
+              {"title": "Delivery Guarantees", "path": "core-concepts/01-04-delivery-guarantees"},
+              {"title": "vHosts, Users & Permissions", "path": "core-concepts/01-05-vhosts-users-permissions"},
+              {"title": "Protocols Compared", "path": "core-concepts/01-06-protocols-compared"}
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "02 — Queue Types",
+        "icon": "database",
+        "groups": [
+          {
+            "group": "Queue Types",
+            "pages": [
+              {"title": "Queue Type Decision", "path": "queue-types/02-01-queue-type-decision"},
+              {"title": "Quorum Queue Best Practices", "path": "queue-types/02-02-quorum-queue-best-practices"},
+              {"title": "Classic Queue Retention", "path": "queue-types/02-03-classic-queue-retention"},
+              {"title": "Stream Queues", "path": "queue-types/02-04-stream-queues"},
+              {"title": "Exchange Types", "path": "queue-types/02-05-exchange-types"},
+              {"title": "Priority Queues", "path": "queue-types/02-06-priority-queues"},
+              {"title": "Multi-tenant Policy Framework", "path": "queue-types/02-07-multitenant-policy-framework"},
+              {"title": "Classic Queue Migration Checklist", "path": "queue-types/02-08-classic-queue-migration-checklist"}
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "03 — Architecture",
+        "icon": "server",
+        "groups": [
+          {
+            "group": "Architecture",
+            "pages": [
+              {"title": "Standalone vs. Cluster", "path": "architecture/03-01-standalone-vs-cluster"},
+              {"title": "Cluster Formation", "path": "architecture/03-02-cluster-formation"},
+              {"title": "Erlang Distribution", "path": "architecture/03-03-erlang-distribution"},
+              {"title": "Partition Handling", "path": "architecture/03-04-partition-handling"},
+              {"title": "Networking", "path": "architecture/03-05-networking"},
+              {"title": "Load Balancing", "path": "architecture/03-06-load-balancing"},
+              {"title": "Kubernetes Deployment", "path": "architecture/03-07-kubernetes-deployment"},
+              {"title": "Multi-DC Architecture", "path": "architecture/03-08-multi-dc-architecture"},
+              {"title": "VMware Virtualization", "path": "architecture/03-09-vmware-virtualization"},
+              {"title": "Arbiter & Non-voter Nodes", "path": "architecture/03-10-arbiter-nonvoter-nodes"}
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "04 — Deployment",
+        "icon": "package",
+        "groups": [
+          {
+            "group": "Deployment",
+            "pages": [
+              {"title": "Deployment Options", "path": "deployment/04-01-deployment-options"},
+              {"title": "Kubernetes Operator", "path": "deployment/04-02-kubernetes-operator"},
+              {"title": "Docker Compose", "path": "deployment/04-03-docker-compose"},
+              {"title": "Ansible Configuration", "path": "deployment/04-04-ansible-configuration"},
+              {"title": "Bare Metal Sizing", "path": "deployment/04-05-bare-metal-sizing"},
+              {"title": "Cloud VM Sizing", "path": "deployment/04-06-cloud-vm-sizing"},
+              {"title": "Configuration Management", "path": "deployment/04-07-configuration-management"},
+              {"title": "Secrets Management", "path": "deployment/04-08-secrets-management"},
+              {"title": "Backup & Restore", "path": "deployment/04-09-backup-restore"},
+              {"title": "Terraform vs. Alternatives", "path": "deployment/04-10-terraform-vs-alternatives"}
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "05 — Application Dev",
         "icon": "code",
         "groups": [
           {
-            "group": "Overview",
-            "icon": "file-text",
+            "group": "Application Development",
             "pages": [
-              {
-                "title": "Authentication",
-                "path": "authentication",
-                "icon": "lock"
-              }
+              {"title": "Connections & Channels", "path": "application-dev/05-01-connections-channels"},
+              {"title": "Publisher Confirms", "path": "application-dev/05-02-publisher-confirms"},
+              {"title": "Consumer Ack & Prefetch", "path": "application-dev/05-03-consumer-ack-prefetch"},
+              {"title": "DLX & Retry Pattern", "path": "application-dev/05-04-dlx-retry-pattern"},
+              {"title": "Message Serialization", "path": "application-dev/05-05-message-serialization"},
+              {"title": "Spring AMQP", "path": "application-dev/05-06-spring-amqp"},
+              {"title": ".NET Client", "path": "application-dev/05-07-dotnet-client"},
+              {"title": "Python / pika", "path": "application-dev/05-08-python-pika"},
+              {"title": "Go Client", "path": "application-dev/05-09-go-client"},
+              {"title": "Node.js Client", "path": "application-dev/05-10-nodejs-client"},
+              {"title": "MQTT Clients", "path": "application-dev/05-11-mqtt-clients"},
+              {"title": "STOMP Clients", "path": "application-dev/05-12-stomp-clients"},
+              {"title": "Publisher Batching", "path": "application-dev/05-13-publisher-batching"},
+              {"title": "RPC Pattern", "path": "application-dev/05-14-rpc-pattern"}
             ]
-          },
-          {
-            "group": "Sample Endpoints",
-            "openapi": "openapi.yaml"
           }
         ]
       },
       {
-        "tab": "Help Center",
-        "icon": "help-circle",
-        "pages": [
+        "tab": "06 — Security",
+        "icon": "shield",
+        "groups": [
           {
-            "title": "Help Center",
-            "path": "help-center",
-            "icon": "home"
-          },
-          {
-            "group": "FAQs",
-            "icon": "help-circle",
-            "expandable": false,
+            "group": "Security",
             "pages": [
-              {
-                "title": "Documentation Source",
-                "path": "help-center/faq/getting-started"
-              }
+              {"title": "Security Checklist", "path": "security/06-01-security-checklist"},
+              {"title": "TLS Configuration", "path": "security/06-02-tls-configuration"},
+              {"title": "Authentication & Authorization", "path": "security/06-03-authentication-authorization"},
+              {"title": "vHost Isolation", "path": "security/06-04-vhost-isolation"},
+              {"title": "Audit Logging", "path": "security/06-05-audit-logging"},
+              {"title": "Network Security", "path": "security/06-06-network-security"},
+              {"title": "OAuth 2.0 / SAML", "path": "security/06-07-oauth-saml"},
+              {"title": "Shovel & Federation Security", "path": "security/06-08-shovel-federation-security"},
+              {"title": "Compliance Framework", "path": "security/06-09-compliance-framework"}
             ]
-          },
+          }
+        ]
+      },
+      {
+        "tab": "07 — Monitoring",
+        "icon": "activity",
+        "groups": [
+          {
+            "group": "Monitoring",
+            "pages": [
+              {"title": "Monitoring Strategy", "path": "monitoring/07-01-monitoring-strategy"},
+              {"title": "Prometheus & Grafana Setup", "path": "monitoring/07-02-prometheus-grafana-setup"},
+              {"title": "Key Metrics Reference", "path": "monitoring/07-03-key-metrics-reference"},
+              {"title": "Alerting Runbook", "path": "monitoring/07-04-alerting-runbook"},
+              {"title": "Capacity Planning", "path": "monitoring/07-05-capacity-planning"},
+              {"title": "Memory & Disk Alarms", "path": "monitoring/07-06-memory-disk-alarms"},
+              {"title": "Log Aggregation", "path": "monitoring/07-07-log-aggregation"},
+              {"title": "Tracing & Observability", "path": "monitoring/07-08-tracing-observability"},
+              {"title": "Dashboard Tour", "path": "monitoring/07-09-dashboard-tour"},
+              {"title": "Quorum & Raft Monitoring", "path": "monitoring/07-10-quorum-raft-monitoring"}
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "08 — Performance",
+        "icon": "zap",
+        "groups": [
+          {
+            "group": "Performance",
+            "pages": [
+              {"title": "Performance Overview", "path": "performance/08-01-performance-overview"},
+              {"title": "WAL & Disk Tuning", "path": "performance/08-02-wal-disk-tuning"},
+              {"title": "Memory Tuning", "path": "performance/08-03-memory-tuning"},
+              {"title": "Connection & Channel Tuning", "path": "performance/08-04-connection-channel-tuning"},
+              {"title": "Consumer Throughput", "path": "performance/08-05-consumer-throughput"},
+              {"title": "Perf Test", "path": "performance/08-06-perf-test"},
+              {"title": "Flow Control", "path": "performance/08-07-flow-control"},
+              {"title": "Message Size Optimization", "path": "performance/08-08-message-size-optimization"},
+              {"title": "Erlang VM Tuning", "path": "performance/08-09-erlang-tuning"}
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "09 — Operations",
+        "icon": "settings",
+        "groups": [
+          {
+            "group": "Operations",
+            "pages": [
+              {"title": "Day-Two Operations", "path": "operations/09-01-day-two-operations"},
+              {"title": "Cluster Maintenance", "path": "operations/09-02-cluster-maintenance"},
+              {"title": "Policy Management", "path": "operations/09-03-policy-management"},
+              {"title": "Shovel & Federation", "path": "operations/09-04-shovel-federation"},
+              {"title": "Backup & Restore Operations", "path": "operations/09-05-backup-restore-ops"},
+              {"title": "Erlang Cookie Rotation", "path": "operations/09-06-erlang-cookie-rotation"},
+              {"title": "Definitions Management", "path": "operations/09-07-definitions-management"}
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "10 — Upgrades",
+        "icon": "arrow-up-circle",
+        "groups": [
+          {
+            "group": "Upgrades",
+            "pages": [
+              {"title": "Upgrade Overview", "path": "upgrades/10-01-upgrade-overview"},
+              {"title": "Pre-Upgrade Checklist", "path": "upgrades/10-02-pre-upgrade-checklist"},
+              {"title": "Rolling Upgrade Procedure", "path": "upgrades/10-03-rolling-upgrade-procedure"},
+              {"title": "Classic to Quorum Migration", "path": "upgrades/10-04-classic-to-quorum-migration"},
+              {"title": "3.13 → 4.0 Upgrade Guide", "path": "upgrades/10-05-39-to-40-guide"},
+              {"title": "4.0 → 4.1 Upgrade Guide", "path": "upgrades/10-06-40-to-41-guide"},
+              {"title": "4.1 → 4.2 Upgrade Guide", "path": "upgrades/10-07-41-to-42-guide"},
+              {"title": "Rollback Strategy", "path": "upgrades/10-08-rollback-strategy"}
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "11 — HA & DR",
+        "icon": "shield",
+        "groups": [
+          {
+            "group": "High Availability & Disaster Recovery",
+            "pages": [
+              {"title": "HA Patterns", "path": "ha-dr/11-01-ha-patterns"},
+              {"title": "DR, RTO & RPO", "path": "ha-dr/11-02-dr-rto-rpo"},
+              {"title": "Multi-DC Architecture", "path": "ha-dr/11-03-multi-dc-architecture"},
+              {"title": "Disaster Recovery Runbook", "path": "ha-dr/11-04-disaster-recovery-runbook"},
+              {"title": "HA Testing", "path": "ha-dr/11-05-ha-testing"},
+              {"title": "Kubernetes HA", "path": "ha-dr/11-06-kubernetes-ha"},
+              {"title": "SLA Runbook", "path": "ha-dr/11-07-sla-runbook"}
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "12 — Troubleshooting",
+        "icon": "alert-triangle",
+        "groups": [
           {
             "group": "Troubleshooting",
-            "icon": "alert-triangle",
-            "expandable": false,
             "pages": [
-              {
-                "title": "Page Missing in Sidebar",
-                "path": "help-center/troubleshooting/install-error"
-              }
-            ]
-          },
-          {
-            "group": "Guides",
-            "icon": "book-open",
-            "expandable": false,
-            "pages": [
-              {
-                "title": "Create Your First Page",
-                "path": "help-center/guides/setup-project"
-              }
+              {"title": "Troubleshooting Guide", "path": "troubleshooting/12-00-troubleshooting-guide"},
+              {"title": "Memory Alarms", "path": "troubleshooting/12-01-memory-alarms"},
+              {"title": "Consumer Lag", "path": "troubleshooting/12-02-consumer-lag"},
+              {"title": "Connection Issues", "path": "troubleshooting/12-03-connection-issues"},
+              {"title": "Slow Confirms", "path": "troubleshooting/12-04-slow-confirms"},
+              {"title": "Node Startup Failures", "path": "troubleshooting/12-05-node-startup-failures"},
+              {"title": "Message Loss", "path": "troubleshooting/12-06-message-loss"},
+              {"title": "Cluster Formation Issues", "path": "troubleshooting/12-07-cluster-formation"},
+              {"title": "Monitoring Issues", "path": "troubleshooting/12-08-monitoring-issues"},
+              {"title": "Performance Degradation", "path": "troubleshooting/12-09-performance-degradation"},
+              {"title": "Post-Upgrade Issues", "path": "troubleshooting/12-10-post-upgrade-issues"}
             ]
           }
         ]
       },
       {
-        "tab": "Changelog",
-        "icon": "clock",
-        "pages": [
+        "tab": "13 — Reference",
+        "icon": "book",
+        "groups": [
           {
-            "title": "Changelog",
-            "path": "changelog",
-            "icon": "history"
+            "group": "Reference",
+            "pages": [
+              {"title": "rabbitmqctl Reference", "path": "reference/13-01-rabbitmqctl-reference"},
+              {"title": "Configuration Reference", "path": "reference/13-02-configuration-reference"},
+              {"title": "Policy Key Reference", "path": "reference/13-03-policy-key-reference"},
+              {"title": "Port Reference", "path": "reference/13-04-port-reference"},
+              {"title": "Metrics Reference", "path": "reference/13-05-metrics-reference"},
+              {"title": "Version Compatibility", "path": "reference/13-06-version-compatibility"}
+            ]
           }
         ]
       }
