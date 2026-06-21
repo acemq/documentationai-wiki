@@ -1,0 +1,62 @@
+---
+title: Metadata Store (Khepri)
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Metadata Store](https://www.rabbitmq.com/docs/metadata-store)
+
+Khepri is RabbitMQ's Raft-based metadata store, replacing Mnesia as of RabbitMQ 4.0. It stores all cluster schema: virtual hosts, users, exchanges, queues, bindings, policies, and runtime parameters.
+
+## What is Khepri?
+
+Khepri is a tree-structured, Raft-replicated key-value store built on Ra (RabbitMQ's Raft library). Unlike Mnesia (which used full-mesh replication), Khepri uses Raft consensus with a leader and followers.
+
+**Key properties:**
+- Raft-based consistency — majority quorum required for writes
+- Leader election within seconds of node failure
+- Strongly consistent writes; local-cache reads for many operations
+- Partition-tolerant (majority side continues; minority side read-only)
+
+## Khepri vs. Mnesia
+
+| Aspect | Mnesia (old) | Khepri (new) |
+|---|---|---|
+| Consistency model | Eventually consistent | Strongly consistent |
+| Partition handling | Required `cluster_partition_handling` config | Raft handles automatically |
+| Split-brain risk | Yes — required careful handling | No — minority side rejects writes |
+| Activation | Default before 4.0 | Required in 4.0+; feature flag in 3.13 |
+
+## Enabling Khepri (3.13 Migration)
+
+```bash
+# Enable the khepri_db feature flag to migrate
+rabbitmqctl enable_feature_flag khepri_db
+```
+
+This is a one-way operation — Khepri cannot be disabled after enabling. In RabbitMQ 4.0, Mnesia is removed entirely.
+
+## Consistency and Reads
+
+Khepri supports two read modes:
+- **Local cache reads** (default for most metadata operations) — fast, served from local node
+- **Linearizable reads** (for operations requiring strict consistency) — go through Raft leader
+
+During leader election, linearizable reads pause until a new leader is elected. Local cache reads continue on all reachable nodes.
+
+## Operational Considerations
+
+- Khepri requires the same quorum majority as quorum queues — a 3-node cluster tolerates 1 failure
+- Khepri state is included in node data directories — backup data directories or use definitions export
+- Monitor Khepri leader via `rabbitmq-diagnostics cluster_status`
+
+## AceMQ Take
+
+**Plan your Khepri migration before upgrading to 4.x.** Enabling `khepri_db` in a 3.13 cluster requires all nodes to be running and the cluster to have quorum. Don't attempt this during or near a maintenance window — do it well in advance and verify the cluster is healthy afterward.
+
+**Remove Mnesia-era partition handling config.** After Khepri migration, `cluster_partition_handling = pause_minority` and similar keys in `rabbitmq.conf` are no-ops. Clean them up to avoid confusion and stale config warnings.
+
+**Treat Khepri like a quorum queue for capacity planning.** Khepri uses the same Raft majority requirement as quorum queues. If you have a 3-node cluster and lose 2 nodes, both quorum queues and Khepri become unavailable. Design for N/2+1 node availability in your SLA.

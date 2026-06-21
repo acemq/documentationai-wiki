@@ -1,0 +1,95 @@
+---
+title: Configuration
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Configuration](https://www.rabbitmq.com/docs/configure)
+
+RabbitMQ is configured via `rabbitmq.conf` (primary) and environment variables. The new format is a flat key-value `sysctl`-style file.
+
+## Configuration Files
+
+| File | Format | Purpose |
+|---|---|---|
+| `rabbitmq.conf` | sysctl (key = value) | Main configuration (preferred) |
+| `advanced.config` | Erlang terms | Advanced / plugin config not yet in .conf format |
+| `rabbitmq-env.conf` | Shell variables | Environment variables for the node |
+
+Default locations:
+- Linux: `/etc/rabbitmq/rabbitmq.conf`
+- Docker: `/etc/rabbitmq/rabbitmq.conf` or via `RABBITMQ_CONFIG_FILE` env var
+
+## Key Configuration Parameters
+
+### Node and Networking
+```ini
+node.name = rabbit@my-node
+listeners.tcp.default = 5672
+listeners.ssl.default = 5671
+heartbeat = 60
+channel_max = 2047
+frame_max = 131072
+connection_max = infinity
+```
+
+### Memory and Disk
+```ini
+vm_memory_high_watermark.relative = 0.4    # 40% of RAM
+vm_memory_high_watermark.absolute = 4GB    # or absolute value
+disk_free_limit.relative = 2.0             # 2x RAM
+disk_free_limit.absolute = 10GB            # or absolute value
+```
+
+### Clustering
+```ini
+cluster_formation.peer_discovery_backend = rabbit_peer_discovery_k8s
+cluster_partition_handling = ignore        # deprecated in 4.3+, remove
+```
+
+### Logging
+```ini
+log.file.level = info                      # debug, info, warning, error, critical
+log.console = true
+log.console.level = info
+```
+
+## Environment Variables
+
+Key environment variables (set in `rabbitmq-env.conf` or container env):
+
+| Variable | Description |
+|---|---|
+| `RABBITMQ_NODENAME` | Node name override |
+| `RABBITMQ_NODE_PORT` | AMQP listener port |
+| `RABBITMQ_DIST_PORT` | Erlang distribution port |
+| `RABBITMQ_CONFIG_FILE` | Path to rabbitmq.conf |
+| `RABBITMQ_LOG_BASE` | Log directory |
+| `RABBITMQ_MNESIA_BASE` | Data directory (historical; still used for some data) |
+| `RABBITMQ_ERLANG_COOKIE` | Erlang cookie value |
+| `RABBITMQ_USE_LONGNAME` | Use long node names (for FQDN environments) |
+
+## Verifying Configuration
+
+```bash
+# Show effective configuration
+rabbitmqctl environment
+
+# Validate config file without starting
+rabbitmq-diagnostics check_running  # checks if server is up
+rabbitmq-diagnostics check_local_alarms
+
+# Show all config in effect
+rabbitmq-diagnostics config_files
+```
+
+## AceMQ Take
+
+**Use IaC for configuration management.** `rabbitmq.conf` should be version-controlled and deployed via Ansible, Helm values, or Terraform — not hand-edited on running nodes. Configuration drift between cluster nodes causes hard-to-debug issues.
+
+**Set memory and disk watermarks explicitly.** The defaults (40% RAM, 2× RAM disk) are reasonable starting points but should be tuned for your actual hardware. Under-provisioning disk is the most common cause of broker-wide pauses — err on the side of more disk headroom.
+
+**Test config changes in staging.** Syntax errors in `rabbitmq.conf` prevent the broker from starting. Validate your config in a test environment before deploying to production. Use `rabbitmq-diagnostics check_local_alarms` after startup to verify the broker is in a clean state.

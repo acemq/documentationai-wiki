@@ -1,0 +1,72 @@
+---
+title: Cluster Formation and Peer Discovery
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Cluster Formation](https://www.rabbitmq.com/docs/cluster-formation)
+
+Peer discovery is the mechanism by which RabbitMQ nodes find each other and form a cluster at startup. Without peer discovery, nodes start as standalone brokers.
+
+## Peer Discovery Backends
+
+| Backend | Plugin | Best For |
+|---|---|---|
+| Config file | Built-in | Static infrastructure; bare metal |
+| Classic config | Built-in | Legacy config format |
+| DNS | Built-in | DNS SRV or A records |
+| AWS EC2 | `rabbitmq_peer_discovery_aws` | AWS EC2 auto-scaling groups |
+| Kubernetes | `rabbitmq_peer_discovery_k8s` | Kubernetes StatefulSets |
+| Consul | `rabbitmq_peer_discovery_consul` | Consul service registry |
+| etcd | `rabbitmq_peer_discovery_etcd` | etcd-based infrastructure |
+
+## Config File Discovery
+
+```ini
+# rabbitmq.conf
+cluster_formation.peer_discovery_backend = rabbit_peer_discovery_classic_config
+cluster_formation.classic_config.nodes.1 = rabbit@rmq-node-1
+cluster_formation.classic_config.nodes.2 = rabbit@rmq-node-2
+cluster_formation.classic_config.nodes.3 = rabbit@rmq-node-3
+```
+
+## Kubernetes Discovery
+
+```ini
+cluster_formation.peer_discovery_backend = rabbit_peer_discovery_k8s
+cluster_formation.k8s.host = kubernetes.default.svc.cluster.local
+cluster_formation.k8s.address_type = hostname
+cluster_formation.k8s.service_name = rabbitmq-headless
+```
+
+The Kubernetes plugin queries the Kubernetes API for pods in the headless service and uses their hostnames as peer addresses. Requires `list`, `get`, and `watch` RBAC permissions on `endpoints` and `pods`.
+
+## Startup Ordering and Race Conditions
+
+When multiple nodes start simultaneously, they may all try to form a cluster at once. RabbitMQ handles this with:
+- **Startup randomization** — nodes wait a random interval before peer discovery
+- **Lock file / distributed lock** — some backends (Consul, etcd) use distributed locking to serialize cluster formation
+
+For Kubernetes, the `rabbitmq/cluster-operator` (Kubernetes Operator) handles ordering automatically.
+
+## Node Health Checks and Cleanup
+
+Plugin backends can be configured to automatically remove nodes that haven't been seen for a threshold period:
+
+```ini
+cluster_formation.node_cleanup.only_log_warning = false
+cluster_formation.node_cleanup.interval = 60  # seconds
+```
+
+This prevents phantom node entries in clusters where nodes are replaced (not just restarted) — common in Kubernetes and cloud environments.
+
+## AceMQ Take
+
+**Use the Kubernetes Operator for Kubernetes deployments.** The `rabbitmq/cluster-operator` handles peer discovery, rolling upgrades, PVC management, and TLS configuration automatically. Running RabbitMQ on Kubernetes without the Operator is significantly more operational work.
+
+**DNS discovery for simple static clusters.** If you have a fixed set of hostnames (e.g. 3 VM nodes with known DNS), DNS-based discovery is the simplest reliable option — no plugin configuration needed beyond setting the `peer_discovery_backend`.
+
+**Always configure cleanup for cloud environments.** In environments where pods/instances are replaced rather than restarted (not the same IP/identity after restart), enable `node_cleanup` to automatically purge stale node registrations. Without it, the cluster retains ghost entries that affect quorum calculations.

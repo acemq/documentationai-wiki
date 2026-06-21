@@ -1,0 +1,79 @@
+---
+title: Schema Definition Export and Import
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Schema Definition Export and Import](https://www.rabbitmq.com/docs/definitions)
+
+Definitions are a JSON export of all broker schema: virtual hosts, users, permissions, exchanges, queues, bindings, policies, parameters, and runtime parameters. They are the primary mechanism for backup, DR, and IaC-based provisioning.
+
+## What's Included in Definitions
+
+- Virtual hosts and their default queue type
+- Users and password hashes (salted)
+- Permissions (per user, per vhost)
+- Exchanges (name, type, durability, arguments)
+- Queues (name, durability, type, arguments)
+- Bindings (exchange → queue routing)
+- Policies and operator policies
+- Runtime parameters (Shovel, Federation, etc.)
+- Global parameters (cluster name, etc.)
+
+> **Not included:** Message data, queue contents, or Erlang-level state.
+
+## Exporting Definitions
+
+```bash
+# Via rabbitmqadmin
+rabbitmqadmin export definitions.json
+
+# Via management HTTP API
+curl -u guest:guest http://localhost:15672/api/definitions > definitions.json
+
+# Via rabbitmqctl (3.12+)
+rabbitmqctl export_definitions definitions.json
+```
+
+## Importing Definitions
+
+```bash
+# Via rabbitmqadmin
+rabbitmqadmin import definitions.json
+
+# Via management HTTP API (PUT, merge)
+curl -u guest:guest -X POST -H 'Content-Type: application/json' \
+     http://localhost:15672/api/definitions \
+     -d @definitions.json
+
+# Via rabbitmqctl (3.12+)
+rabbitmqctl import_definitions definitions.json
+```
+
+## Boot-Time Definition Loading
+
+RabbitMQ can load a definitions file at startup:
+```ini
+load_definitions = /etc/rabbitmq/definitions.json
+```
+
+This is the recommended approach for immutable infrastructure — bake the definitions file into your container image or mount it as a ConfigMap. On startup, RabbitMQ merges the definitions into the existing cluster state.
+
+## Definitions as IaC
+
+Definitions files are the bridge between IaC (Terraform, Ansible) and RabbitMQ. Common patterns:
+
+1. Export a hand-configured staging environment, commit the JSON to git, deploy it to production
+2. Generate definitions.json from Terraform and mount it at boot
+3. Use `rabbitmqadmin` in CI/CD to declare topology changes as code
+
+## AceMQ Take
+
+**Export definitions on a schedule.** Daily definitions export (via cron or a scheduled job) provides a recovery point for topology changes. Store them in object storage with versioning. In a DR scenario, definitions import is the first step to rebuilding a cluster's schema.
+
+**Use boot-time loading for immutable infra.** Kubernetes deployments should mount a `definitions.json` ConfigMap (generated from IaC) and load it at boot. This eliminates manual topology setup and ensures all cluster nodes share the same initial schema.
+
+**Version-control your definitions.** Treat `definitions.json` as code. Changes to topology should go through a PR review process — adding a new queue, changing a policy, modifying a vhost. The JSON format diffs cleanly in git.

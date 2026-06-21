@@ -1,0 +1,57 @@
+---
+title: Priority Queues
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Priority Queues](https://www.rabbitmq.com/docs/priority)
+
+RabbitMQ supports per-message priorities on classic queues. Higher-priority messages are delivered to consumers before lower-priority ones, regardless of arrival order.
+
+## Declaring a Priority Queue
+
+```java
+Map<String, Object> args = new HashMap<>();
+args.put("x-max-priority", 10);  // priority levels 0–10
+channel.queueDeclare("my-priority-queue", true, false, false, args);
+```
+
+`x-max-priority` must be set at declaration time and cannot be changed. It is immutable. Values from 1–10 are practical; higher values increase memory and CPU overhead.
+
+## Publishing with Priority
+
+```java
+AMQP.BasicProperties props = new AMQP.BasicProperties.Builder()
+    .priority(7)  // 0 (lowest) to x-max-priority (highest)
+    .build();
+channel.basicPublish("my-exchange", "my-routing-key", props, body);
+```
+
+Messages without a priority value are treated as priority 0.
+
+## Priority and Ordering
+
+RabbitMQ delivers higher-priority messages first, but only from messages already in the queue at delivery time. If a low-priority message is at the head of the queue and a high-priority message arrives after delivery begins, the high-priority message won't preempt the in-flight low-priority delivery.
+
+Effective priority ordering works best when there are messages in the queue to compare — not for queues that are always empty.
+
+## Priority and Other Features
+
+- Priority queues support per-message TTL, DLX, and max-length
+- Priority queues have higher per-message memory overhead than non-priority queues
+- Priority interaction with TTL: a lower-priority message can expire while a higher-priority message is ahead of it
+
+## Quorum Queue Priorities
+
+Quorum queues support **strict message priorities** (a different implementation from classic queue priorities). Set via `x-max-priority` similarly, but the semantics are slightly different — quorum queue priorities provide strict ordering even for in-flight messages.
+
+## AceMQ Take
+
+**Use priorities sparingly and with bounded ranges.** `x-max-priority=10` is sufficient for most use cases. Higher values cause RabbitMQ to maintain more internal priority buckets, increasing memory overhead per message. If you only need high/normal/low, use `x-max-priority=3`.
+
+**Priority queues don't help if the queue is always empty.** The priority mechanism only matters when the queue has a backlog. If your consumers keep up with publishers, all messages are delivered immediately regardless of priority. Priority is most useful for workloads with predictable bursts where you want critical messages to drain first.
+
+**Avoid mixing priority with max-length `drop-head`.** When a priority queue overflows with `drop-head`, RabbitMQ drops the lowest-priority message from the queue head. This is usually correct behavior but can cause surprising results if low-priority messages are time-sensitive. Test overflow behavior explicitly.

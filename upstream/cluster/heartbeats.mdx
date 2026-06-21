@@ -1,0 +1,76 @@
+---
+title: Heartbeats
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Heartbeats](https://www.rabbitmq.com/docs/heartbeats)
+
+RabbitMQ uses two heartbeat mechanisms: AMQP-level heartbeats between clients and the broker, and Erlang net_tick for inter-node liveness. Both detect dead peers and trigger recovery.
+
+## AMQP Heartbeats
+
+AMQP heartbeats are sent on idle connections at a negotiated interval. If a heartbeat frame isn't received within 2 intervals, the connection is considered dead and closed.
+
+**Negotiation:** Client proposes a value; broker proposes a value; the lower of the two is used.
+
+```ini
+# rabbitmq.conf server-side default (seconds)
+heartbeat = 60
+```
+
+Common client-side settings:
+```python
+# Python pika
+connection = pika.BlockingConnection(
+    pika.ConnectionParameters(heartbeat=60)
+)
+```
+
+```java
+// Java client
+ConnectionFactory factory = new ConnectionFactory();
+factory.setRequestedHeartbeat(60);
+```
+
+**Setting heartbeat to 0** disables heartbeats entirely. This is appropriate only for trusted LAN environments with additional TCP keepalive configured at the OS level.
+
+## Heartbeats and Firewalls
+
+Stateful firewalls and NAT devices track TCP connections and expire idle connections after a timeout. If the firewall timeout is shorter than the RabbitMQ heartbeat interval, idle AMQP connections are silently dropped by the firewall while both client and broker still consider them open.
+
+Solution: set heartbeat ≤ firewall idle timeout / 2. For environments with 5-minute firewall timeouts, use heartbeat=60 (2 heartbeats per interval = 4 minutes to detect failure, under the firewall threshold).
+
+## Erlang Nettick (Inter-Node)
+
+RabbitMQ cluster nodes use Erlang's `net_ticktime` to detect failed peers:
+
+```ini
+# rabbitmq.conf
+net_ticktime = 60  # default: 60 seconds
+```
+
+A node is declared dead if no tick is received within `4 × net_ticktime` seconds. With the default 60s, a node failure takes up to 4 minutes to detect.
+
+Reduce `net_ticktime` for faster failure detection, but this increases sensitivity to network latency spikes. Values below 15 seconds are not recommended for production.
+
+## TCP Keepalives
+
+OS-level TCP keepalives operate independently of AMQP heartbeats:
+
+```ini
+tcp_listen_options.keepalive = true
+```
+
+TCP keepalives detect dead connections at the TCP layer; AMQP heartbeats detect them at the application layer. Both are useful — they catch different failure modes.
+
+## AceMQ Take
+
+**Set heartbeat to 60 seconds.** This is the RabbitMQ default and a safe value for most LAN environments. Don't disable heartbeats in production — without them, dead connections accumulate and aren't cleaned up until the next publish or consume attempt.
+
+**Match heartbeat to your network environment.** If your clients are behind a cloud load balancer (AWS NLB, GCP TCP LB), check the idle connection timeout. AWS NLB default is 350 seconds; ALB is 60 seconds. Set heartbeat below the LB idle timeout to keep connections alive.
+
+**Enable TCP keepalives alongside heartbeats.** TCP keepalives catch network-level failures that don't manifest as AMQP-level inactivity (e.g. a hung TCP stack that doesn't close the socket). Use both for defense in depth.

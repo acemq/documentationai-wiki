@@ -1,0 +1,85 @@
+---
+title: Access Control
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Access Control](https://www.rabbitmq.com/docs/access-control)
+
+RabbitMQ access control is built on users, virtual hosts, and permissions. Users are granted specific permissions on each vhost they can access.
+
+## Users and Authentication
+
+```bash
+# Create a user
+rabbitmqctl add_user myapp s3cr3t
+
+# Set user tags (roles)
+rabbitmqctl set_user_tags myapp management  # or: monitoring, policymaker, administrator
+
+# Delete the default guest user in production
+rabbitmqctl delete_user guest
+```
+
+**User tags** grant access to the management UI and API:
+
+| Tag | Access Level |
+|---|---|
+| (none) | AMQP only; no management access |
+| `monitoring` | Read-only management UI |
+| `policymaker` | Set policies and runtime parameters |
+| `management` | View own vhosts, queues, exchanges |
+| `administrator` | Full management access |
+
+## Permissions
+
+Permissions are per-user, per-vhost, and consist of three regex patterns:
+
+```bash
+rabbitmqctl set_permissions -p /my-vhost myapp \
+  "^myapp\..*"   \  # configure permission (declare/delete queues and exchanges)
+  "^myapp\..*"   \  # write permission (publish)
+  "^myapp\..*"      # read permission (consume, purge)
+```
+
+The patterns are matched against resource names (queue names, exchange names). An empty string `""` means no permission.
+
+**Common pattern:**
+- Application user: `configure=""`, `write="^app-exchange$"`, `read="^app-queue$"` — can publish and consume only
+- Service account: `configure="^svc\..*"`, `write="^svc\..*"`, `read="^svc\..*"` — owns all `svc.*` resources
+
+## Topic Permissions
+
+For MQTT and STOMP (topic-based protocols), topic permissions control which routing keys a user can publish to or subscribe from:
+
+```bash
+rabbitmqctl set_topic_permissions -p / myapp amq.topic \
+  "^sensors\..*"  \  # write (publish) routing key pattern
+  "^sensors\..*"     # read (subscribe) routing key pattern
+```
+
+## Authentication Backends
+
+Multiple authentication backends can be chained:
+
+```ini
+# rabbitmq.conf
+auth_backends.1 = rabbit_auth_backend_internal  # built-in user database
+auth_backends.2 = rabbit_auth_backend_ldap       # LDAP fallback
+auth_backends.3 = rabbit_auth_backend_oauth2     # OAuth 2.0
+```
+
+Backends are tried in order until one succeeds or all fail.
+
+## AceMQ Take
+
+**Delete the guest user.** The `guest` user (password: `guest`) is created by default and can only connect from localhost — but it's still a credential that should be removed in any production deployment. Make this a checklist item.
+
+**Principle of least privilege for AMQP users.** Application users should have configure=`""` (cannot declare or delete queues), write limited to their exchange, read limited to their queue. If an app doesn't need to declare topology, don't give it the permission to do so.
+
+**Separate credentials per service.** One username per application/service, not a shared credential. When a service is decommissioned, the credential is deleted. When a credential is compromised, blast radius is limited to one service's queues.
+
+**Rotate passwords programmatically.** Don't embed static AMQP passwords in config files or environment variables. Use a secret manager (Vault, AWS Secrets Manager, Kubernetes Secrets) and rotate passwords on a schedule. The management API (`PUT /api/users/{user}`) allows password rotation without broker restart.

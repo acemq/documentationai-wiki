@@ -1,0 +1,92 @@
+---
+title: Networking
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Networking](https://www.rabbitmq.com/docs/networking)
+
+RabbitMQ is a networked service with multiple TCP listeners. Understanding its networking configuration is critical for security, performance, and cluster formation.
+
+## Default Ports
+
+| Port | Protocol | Description |
+|---|---|---|
+| 5672 | AMQP 0-9-1 / 1.0 | Main client port |
+| 5671 | AMQP 0-9-1 / 1.0 (TLS) | TLS client port |
+| 15672 | HTTP | Management UI and API |
+| 15671 | HTTPS | Management UI (TLS) |
+| 15692 | HTTP | Prometheus metrics |
+| 5552 | Streams | RabbitMQ Streams protocol |
+| 5551 | Streams (TLS) | Streams protocol (TLS) |
+| 1883 | MQTT | MQTT plugin |
+| 8883 | MQTT (TLS) | MQTT plugin (TLS) |
+| 61613 | STOMP | STOMP plugin |
+| 25672 | Erlang dist | Inter-node and CLI communication |
+| 4369 | EPMD | Erlang Port Mapper Daemon |
+
+## Interface Binding
+
+By default, RabbitMQ listeners bind to all interfaces (`0.0.0.0`). For production, bind to specific interfaces:
+
+```ini
+# rabbitmq.conf
+listeners.tcp.default = 10.0.1.5:5672
+management.listener.ip = 127.0.0.1
+management.listener.port = 15672
+```
+
+## TCP Buffer Tuning
+
+For high-throughput deployments, tuning TCP send/receive buffers can improve performance:
+
+```ini
+tcp_listen_options.backlog = 4096
+tcp_listen_options.sndbuf = 32768
+tcp_listen_options.recbuf = 32768
+tcp_listen_options.nodelay = true
+tcp_listen_options.linger.on = true
+tcp_listen_options.linger.timeout = 0
+```
+
+OS-level TCP settings (sysctl) also matter: `net.core.somaxconn`, `net.ipv4.tcp_max_syn_backlog`.
+
+## Firewall Requirements
+
+For a cluster, these ports must be open between nodes:
+- **25672** — Erlang distribution (inter-node)
+- **4369** — EPMD (peer discovery)
+- **5672/5671** — AMQP (if clients load-balance across nodes)
+
+Firewall or security group rules must allow bidirectional traffic between all cluster nodes on 25672 and 4369.
+
+## TLS Configuration
+
+```ini
+listeners.ssl.default = 5671
+ssl_options.cacertfile = /etc/rabbitmq/ca-cert.pem
+ssl_options.certfile   = /etc/rabbitmq/server-cert.pem
+ssl_options.keyfile    = /etc/rabbitmq/server-key.pem
+ssl_options.versions.1 = tlsv1.3
+ssl_options.versions.2 = tlsv1.2
+```
+
+## IPv6
+
+RabbitMQ supports IPv6. Enable dual-stack or IPv6-only with:
+```ini
+listeners.tcp.1 = :::5672
+```
+
+## AceMQ Take
+
+**Restrict management port to private network.** Port 15672 exposes a full admin API. It should never be accessible from the public internet — bind it to an internal interface or put it behind a VPN/bastion. Use TLS (15671) if it must be remotely accessible.
+
+**Open 25672 and 4369 only between cluster nodes.** The Erlang distribution port is powerful — it allows arbitrary code execution with the right cookie. Restrict it to the cluster's private subnet. Never expose it to the internet.
+
+**Use connection limits to protect from connection floods.** Configure `connection_max` to limit total connections a node will accept. Without a limit, a misbehaving client can exhaust file descriptors and crash the node.
+
+**Monitor Erlang distribution link quality.** Inter-node communication degradation is an early warning of cluster instability. Track `rabbitmq_erlang_distribution_*` metrics in Prometheus. Latency spikes on the distribution link can trigger false-positive nettick timeouts and partition detection.

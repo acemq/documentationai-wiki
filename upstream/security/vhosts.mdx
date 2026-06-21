@@ -1,0 +1,70 @@
+---
+title: Virtual Hosts
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect, developer]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Virtual Hosts](https://www.rabbitmq.com/docs/vhosts)
+
+Virtual hosts (vhosts) are logical namespaces within a RabbitMQ node. Each vhost has its own set of exchanges, queues, bindings, policies, runtime parameters, and user permissions. Resources in different vhosts are completely isolated from each other.
+
+## Creating and Managing Vhosts
+
+```bash
+# Create a vhost
+rabbitmqctl add_vhost /my-app
+
+# List vhosts
+rabbitmqctl list_vhosts
+
+# Grant user access to a vhost
+rabbitmqctl set_permissions -p /my-app myuser ".*" ".*" ".*"
+
+# Delete a vhost (deletes all resources in it)
+rabbitmqctl delete_vhost /my-app
+```
+
+## Default Vhost
+
+RabbitMQ creates a default vhost named `/` (forward slash). In production, use named vhosts for each application or environment instead of sharing `/`.
+
+## Default Queue Type per Vhost
+
+Set the Default Queue Type (DQT) to avoid requiring every application to set `x-queue-type`:
+
+```bash
+rabbitmqctl set_default_queue_type /my-app quorum
+```
+
+With DQT set to `quorum`, any queue declared without an explicit `x-queue-type` becomes a quorum queue. This is the recommended approach for new vhosts.
+
+## Vhost Tags and Metadata
+
+Vhosts can have a description and tags for organization:
+```bash
+rabbitmqctl add_vhost /payments --description "Payment processing" --tags prod,critical
+```
+
+## Vhost Isolation Use Cases
+
+| Use Case | Vhost Separation Strategy |
+|---|---|
+| Multi-tenant SaaS | One vhost per tenant |
+| Environment separation | `/prod`, `/staging`, `/dev` |
+| Microservice isolation | One vhost per bounded context or service group |
+| Security boundary | Separate vhosts for services with different sensitivity levels |
+
+## Limits
+
+Vhosts don't provide physical resource isolation — a busy vhost can impact other vhosts on the same node through shared CPU, memory, and disk. For true resource isolation, use separate RabbitMQ clusters.
+
+## AceMQ Take
+
+**One vhost per application, not one shared vhost.** Sharing `/` across all applications creates namespace conflicts, permission management nightmares, and makes it impossible to apply per-application policies cleanly. Name vhosts after their application (`/payments`, `/notifications`, `/auth`).
+
+**Set DQT to `quorum` on new vhosts.** Make quorum queues the path of least resistance. If developers declare queues without `x-queue-type`, they get quorum queues by default rather than classic queues.
+
+**Don't use vhosts for environment isolation on the same cluster.** If staging and production share a cluster, they compete for the same resources. Environment isolation is better achieved with separate clusters. Vhosts are for logical, not physical, isolation.

@@ -1,0 +1,76 @@
+---
+title: Plugins
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Plugins](https://www.rabbitmq.com/docs/plugins)
+
+RabbitMQ functionality is extended via plugins. Core plugins ship with RabbitMQ; additional plugins can be installed. Plugins must be enabled on all cluster nodes.
+
+## Core Plugins (Shipped with RabbitMQ)
+
+| Plugin | Purpose |
+|---|---|
+| `rabbitmq_management` | HTTP management UI and API (port 15672) |
+| `rabbitmq_management_agent` | Required on all nodes for management |
+| `rabbitmq_prometheus` | Prometheus metrics endpoint (port 15692) |
+| `rabbitmq_shovel` | Point-to-point message moving between brokers |
+| `rabbitmq_shovel_management` | Shovel management UI |
+| `rabbitmq_federation` | Exchange/queue federation |
+| `rabbitmq_federation_management` | Federation management UI |
+| `rabbitmq_mqtt` | MQTT protocol support |
+| `rabbitmq_web_mqtt` | MQTT over WebSocket |
+| `rabbitmq_stomp` | STOMP protocol support |
+| `rabbitmq_web_stomp` | STOMP over WebSocket |
+| `rabbitmq_stream` | RabbitMQ Streams protocol |
+| `rabbitmq_peer_discovery_k8s` | Kubernetes cluster formation |
+| `rabbitmq_peer_discovery_aws` | AWS EC2 cluster formation |
+| `rabbitmq_peer_discovery_consul` | Consul cluster formation |
+| `rabbitmq_peer_discovery_etcd` | etcd cluster formation |
+| `rabbitmq_auth_backend_ldap` | LDAP authentication |
+| `rabbitmq_auth_backend_oauth2` | OAuth 2.0 authentication |
+
+## Managing Plugins
+
+```bash
+# Enable a plugin
+rabbitmq-plugins enable rabbitmq_prometheus
+
+# Enable with dependencies (recommended)
+rabbitmq-plugins enable --offline rabbitmq_management
+
+# List enabled plugins
+rabbitmq-plugins list -E
+
+# List all available plugins
+rabbitmq-plugins list
+
+# Disable a plugin
+rabbitmq-plugins disable rabbitmq_management
+```
+
+## Persistent Plugin Configuration
+
+For Kubernetes/Docker deployments, enable plugins at container startup via the `RABBITMQ_ENABLED_PLUGINS_FILE` or by baking an `enabled_plugins` file:
+
+```
+# /etc/rabbitmq/enabled_plugins
+[rabbitmq_management, rabbitmq_prometheus, rabbitmq_peer_discovery_k8s, rabbitmq_shovel].
+```
+
+Or use the env-driven approach in the RabbitMQ Docker image:
+```bash
+RABBITMQ_PLUGINS=rabbitmq_management rabbitmq_prometheus
+```
+
+## AceMQ Take
+
+**Always enable `rabbitmq_prometheus`.** It's the foundation of production monitoring. Enable it from day one, even if you don't have a Prometheus/Grafana stack yet — it's near-zero overhead and you'll need it.
+
+**Enable plugins consistently across all nodes.** A plugin mismatch between nodes (management enabled on node A, not on node B) causes UI and API inconsistencies. Use IaC (Helm, Ansible, enabled_plugins file) to ensure uniform plugin state.
+
+**Restart is required for plugin changes.** Unlike policies and parameters, plugin changes require a node restart. Plan plugin changes during maintenance windows, not during incident response.

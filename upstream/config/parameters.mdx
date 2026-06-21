@@ -1,0 +1,63 @@
+---
+title: Parameters and Policies
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Parameters](https://www.rabbitmq.com/docs/parameters)
+
+RabbitMQ parameters are runtime-configurable values that control broker and plugin behavior. Unlike `rabbitmq.conf`, parameters are stored in the metadata store and take effect immediately without restart.
+
+## Types of Parameters
+
+| Type | Scope | Managed By |
+|---|---|---|
+| **Global parameters** | Cluster-wide | Operators |
+| **Vhost parameters** | Per vhost | Operators |
+| **Policies** | Per vhost, pattern-matched | Operators |
+| **Operator policies** | Per vhost, enforcing | Operators only |
+| **Runtime parameters** | Per component | Plugins |
+
+## Common Runtime Parameters
+
+Plugins use runtime parameters for their configuration:
+
+- **Shovel** — source and destination URIs, queue names
+- **Federation** — upstream definitions (URIs, exchange/queue settings)
+- **MQTT** — default vhost, default user
+
+```bash
+# List all runtime parameters
+rabbitmqctl list_parameters [-p vhost]
+
+# Set a runtime parameter
+rabbitmqctl set_parameter [-p vhost] <component-name> <parameter-name> <value>
+
+# Clear a runtime parameter
+rabbitmqctl clear_parameter [-p vhost] <component-name> <parameter-name>
+```
+
+## Global Parameters
+
+Global parameters apply cluster-wide, not per vhost:
+
+```bash
+# Example: cluster name
+rabbitmqctl set_global_parameter cluster_name my-cluster
+
+# List global parameters
+rabbitmqctl list_global_parameters
+```
+
+## Parameter Persistence
+
+Parameters (unlike `rabbitmq.conf`) are stored in the Khepri metadata store and survive restarts automatically. They are included in definitions export/import.
+
+## AceMQ Take
+
+**Use definitions export to capture parameter state.** Parameters set via `rabbitmqctl` or the management API are not in `rabbitmq.conf` — they live in the cluster state. Export definitions regularly (`rabbitmqadmin export`) to capture them as IaC. Without this, a cluster reset loses all runtime parameter configuration.
+
+**Shovel and Federation configuration lives in parameters.** When configuring Shovel or Federation, the configuration is stored as runtime parameters, not in config files. Include parameter export in your backup and DR procedures.

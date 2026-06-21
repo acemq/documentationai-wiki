@@ -1,0 +1,93 @@
+---
+title: TLS Support
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [TLS Support](https://www.rabbitmq.com/docs/ssl)
+
+RabbitMQ supports TLS for all client protocol listeners (AMQP, MQTT, STOMP, Streams, management) and for inter-node Erlang distribution. TLS is the primary mechanism for encrypting data in transit.
+
+## Enabling TLS for AMQP
+
+```ini
+# rabbitmq.conf
+listeners.ssl.default = 5671
+
+ssl_options.cacertfile = /etc/rabbitmq/certs/ca-cert.pem
+ssl_options.certfile   = /etc/rabbitmq/certs/server-cert.pem
+ssl_options.keyfile    = /etc/rabbitmq/certs/server-key.pem
+
+# Require TLS 1.2 minimum
+ssl_options.versions.1 = tlsv1.3
+ssl_options.versions.2 = tlsv1.2
+
+# Optional: require client certificates (mTLS)
+ssl_options.verify     = verify_peer
+ssl_options.fail_if_no_peer_cert = true
+```
+
+## Mutual TLS (mTLS)
+
+With `verify = verify_peer` and `fail_if_no_peer_cert = true`, clients must present a certificate signed by the configured CA. This enables:
+- Certificate-based authentication (no username/password needed)
+- Zero-trust inter-service authentication
+- Combined with `rabbitmq_auth_mechanism_ssl` plugin for cert-based login
+
+```ini
+# Allow cert DN to be used as username
+auth_mechanisms.1 = EXTERNAL
+ssl_cert_login_from = common_name  # or distinguished_name
+```
+
+## TLS for Management UI
+
+```ini
+management.ssl.port       = 15671
+management.ssl.cacertfile = /etc/rabbitmq/certs/ca-cert.pem
+management.ssl.certfile   = /etc/rabbitmq/certs/server-cert.pem
+management.ssl.keyfile    = /etc/rabbitmq/certs/server-key.pem
+```
+
+## TLS for Inter-Node Communication
+
+```ini
+# advanced.config (Erlang terms)
+[
+  {kernel, [
+    {inet_dist_use_interface, {0,0,0,0}},
+    {inet_dist_listen_min, 25672},
+    {inet_dist_listen_max, 25672}
+  ]},
+  {ssl, [{versions, ['tlsv1.3', 'tlsv1.2']}]},
+  {rabbit, [
+    {ssl_dist_opt, [
+      {server_certfile, "/etc/rabbitmq/certs/server-cert.pem"},
+      {server_keyfile,  "/etc/rabbitmq/certs/server-key.pem"},
+      {server_cacertfile, "/etc/rabbitmq/certs/ca-cert.pem"},
+      {server_verify, verify_peer},
+      {server_fail_if_no_peer_cert, true}
+    ]}
+  ]}
+].
+```
+
+## Certificate Management
+
+- Use an internal CA or a managed PKI (cert-manager on Kubernetes, AWS Private CA)
+- Set certificate validity periods and rotation schedules
+- Monitor certificate expiry — expired certs cause silent connection failures
+- The RabbitMQ Kubernetes Operator integrates with cert-manager for automatic TLS provisioning
+
+## AceMQ Take
+
+**TLS everywhere.** All AMQP connections, management API calls, and inter-node traffic should be TLS-encrypted in production. The performance overhead is negligible on modern hardware.
+
+**Use cert-manager on Kubernetes.** Manual certificate rotation is operational debt. cert-manager with an issuer (Let's Encrypt, Vault, or private CA) automates issuance and renewal. The RabbitMQ Kubernetes Operator has native cert-manager support.
+
+**mTLS for service-to-service.** For internal microservices communicating with RabbitMQ, mTLS with service-specific client certificates eliminates the need to manage username/password credentials per service. Each service gets a cert; the cert is the credential.
+
+**Alert on certificate expiry.** Export `rabbitmq_ssl_certificate_expiry_seconds` from Prometheus and alert at 30 days and 7 days. An expired server cert brings down all client connections simultaneously — it's a P0 with a predictable and avoidable cause.

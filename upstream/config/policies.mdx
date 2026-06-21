@@ -1,0 +1,91 @@
+---
+title: Policies
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect, developer]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Policies](https://www.rabbitmq.com/docs/policies)
+
+Policies are the recommended way to apply optional queue arguments (TTL, max-length, DLX, HA parameters) to groups of queues and exchanges without modifying application code. Policies are applied by name pattern and can be updated at runtime.
+
+## Why Policies?
+
+- Applied by regex pattern — one policy covers all matching queues
+- Updateable at runtime without queue recreation
+- Can override client-specified x-arguments (operator policies)
+- Versioned and auditable via management UI or API
+
+## Policy Structure
+
+```bash
+rabbitmqctl set_policy <name> <pattern> <definition> [options]
+```
+
+| Field | Description |
+|---|---|
+| `name` | Policy name (unique per vhost) |
+| `pattern` | Regex matching queue/exchange names |
+| `definition` | JSON object of policy keys |
+| `--apply-to` | `queues`, `exchanges`, `classic_queues`, `quorum_queues`, `streams`, or `all` |
+| `--priority` | Higher number wins when multiple policies match |
+| `--vhost` | Target vhost (default: `/`) |
+
+## Common Policy Definitions
+
+```bash
+# TTL for all queues
+rabbitmqctl set_policy ttl-60s ".*" '{"message-ttl": 60000}' --apply-to queues
+
+# DLX for order queues
+rabbitmqctl set_policy dlx-orders "^orders\." \
+  '{"dead-letter-exchange": "dlx.orders"}' --apply-to quorum_queues
+
+# Max length + overflow
+rabbitmqctl set_policy bounded-queues "^bounded\." \
+  '{"max-length": 100000, "overflow": "reject-publish-dlx"}' --apply-to queues
+
+# Quorum delivery limit
+rabbitmqctl set_policy delivery-limit ".*" \
+  '{"delivery-limit": 5}' --apply-to quorum_queues
+```
+
+## Policy Keys by Queue Type
+
+**All queues:**
+- `message-ttl`, `expires`, `max-length`, `max-length-bytes`
+- `overflow`, `dead-letter-exchange`, `dead-letter-routing-key`
+
+**Classic queues only:**
+- `queue-mode` (`lazy`)
+- `ha-mode`, `ha-params` (deprecated, removed in 4.0)
+
+**Quorum queues only:**
+- `delivery-limit`, `dead-letter-strategy` (`at-least-once`)
+- `target-group-size` (quorum member count)
+
+## Policy Priority and Conflicts
+
+When multiple policies match the same queue, the highest-priority one wins. If two policies have the same priority, which wins is non-deterministic — set explicit priorities to avoid this.
+
+Client-provided `x-arguments` override user policy values for the same key. **Operator policies** override both — use them to enforce infrastructure-level limits.
+
+## Operator Policies
+
+Operator policies are a layer above user policies. They enforce constraints that cannot be overridden by application code:
+
+```bash
+rabbitmqctl set_operator_policy max-ttl ".*" '{"message-ttl": 86400000}' --apply-to queues
+```
+
+For numerical keys (TTL, max-length), the lower value between operator policy and user policy/x-args is used.
+
+## AceMQ Take
+
+**Policies are your runtime configuration lever.** Instead of baking TTL, DLX, and max-length into application code as x-arguments, define them as policies. This lets you adjust them without any deployment — critical for responding to production incidents (e.g. emergency DLX on a queue that's poisoning).
+
+**Use operator policies for guardrails.** Set an operator policy with a maximum message-ttl and a max-length ceiling for all queues in a vhost. This prevents any application team from accidentally creating an unbounded queue that can OOM the broker.
+
+**Name policies descriptively.** `dlx-payments`, `ttl-short-lived`, `bounded-events` is better than `policy1`, `p2`, `my-policy`. Policy names are how operators understand configuration at a glance in the management UI.

@@ -1,0 +1,95 @@
+---
+title: Clustering and Network Partitions
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "4.3+"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Network Partitions](https://www.rabbitmq.com/docs/partitions)
+
+This guide covers how RabbitMQ (4.3+) handles network partitions. Starting with RabbitMQ 4.3, all replicated state is Raft-based (Khepri metadata store, quorum queues, streams). Mnesia and partition handling strategies (`pause_minority`, etc.) have been removed.
+
+## All Replicated State is Now Raft
+
+In RabbitMQ 4.3+:
+- **Khepri** — Raft-based metadata store (replaces Mnesia)
+- **Quorum queues** — Raft-based replication
+- **Streams** — Raft-based coordinators
+
+The deprecated `cluster_partition_handling` config keys (`pause_minority`, `autoheal`, etc.) are accepted but have no effect and should be removed.
+
+## Raft Partition Scenarios
+
+### Scenario 1: Leader Node Disconnects
+
+The remaining majority elects a new leader (typically seconds). During the election window:
+- Writes (publishes) are rejected or buffered
+- Quorum queue consumer deliveries pause
+- Stream consumers can continue reading already-replicated data from replicas
+- Khepri local-cache reads continue; linearizable reads pause
+
+Once a new leader is elected, normal operation resumes. Publisher confirms that were in-flight may be nacked — publishers should retry.
+
+### Scenario 2: Follower Node Disconnects
+
+The majority side continues normally. The disconnected follower:
+- Khepri: serves local cached reads (eventually consistent)
+- Quorum queue deliveries pause on the disconnected node
+- Stream consumers on the disconnected node can still read locally-available data
+
+On reconnect, the follower retrieves missing Raft log entries from the leader and resumes.
+
+### Scenario 3: Non-Member Node Disconnects
+
+A node that hosts no quorum queue or stream replicas — its loss only reduces cluster capacity, not availability. Clients connected to it must reconnect to a reachable node.
+
+## Raft Quorum Requirements
+
+| Cluster Size | Tolerated Failures | Partition Tolerant? |
+|---|---|---|
+| 1 | 0 | N/A |
+| 2 | 0 | No |
+| 3 | 1 | Yes |
+| 5 | 2 | Yes |
+| 7 | 3 | Yes |
+
+A majority must be online for writes. If the majority is lost, operations requiring Raft consensus fail until the majority is restored.
+
+## Detecting Partitions
+
+```bash
+# Check cluster status for unreachable nodes
+rabbitmq-diagnostics cluster_status
+
+# Check quorum queue health
+rabbitmq-queues quorum_status <queue-name>
+
+# Check if a node can be safely taken down
+rabbitmq-diagnostics check_if_node_is_quorum_critical
+```
+
+## Partition Recovery
+
+Raft-based recovery is automatic. Disconnected nodes:
+1. Try to reconnect to peers continuously
+2. On reconnect, discover the current leader
+3. Retrieve missing Raft log entries from the leader
+4. Resume as a follower once caught up
+
+Long-duration partitions mean more log entries to sync — a catching-up node is temporarily unavailable for leader election.
+
+## VM Suspend/Resume
+
+A VM suspended by a hypervisor and then resumed looks like a network partition to other cluster members. The suspended node doesn't know time passed; others see it as failed. Raft's adaptive failure detector and incremental log recovery handles this gracefully.
+
+## AceMQ Take
+
+**Run odd-number clusters of 3 or 5.** Raft's quorum requirement makes even-number clusters wasteful — a 4-node cluster has the same fault tolerance as a 3-node one but costs more.
+
+**Remove deprecated partition handling config.** If you're upgrading from 3.x, audit `rabbitmq.conf` for `cluster_partition_handling` keys and remove them. They're no-ops in 4.3+ but indicate stale configuration.
+
+**Monitor quorum health proactively.** Run `rabbitmq-diagnostics check_if_node_is_quorum_critical` as a pre-flight check before any maintenance window. If the answer is "yes, this node is quorum-critical", do not take it down without first redistributing its quorum queue leaders.
+
+**Design for leader election delays.** During a leader election (typically 1–10 seconds), writes to affected quorum queues are delayed or rejected. Your publishers should handle nacks with retry + exponential backoff. Design your consumer-side SLAs to tolerate brief delivery pauses.

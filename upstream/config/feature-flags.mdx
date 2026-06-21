@@ -1,0 +1,63 @@
+---
+title: Feature Flags
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.8 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Feature Flags](https://www.rabbitmq.com/docs/feature-flags)
+
+Feature flags are a mechanism that enables new features incrementally during rolling upgrades. They allow mixed-version clusters to operate safely while a rolling upgrade is in progress.
+
+## Why Feature Flags?
+
+During a rolling upgrade, the cluster temporarily runs a mix of old and new node versions. Feature flags prevent new-version nodes from activating features that old-version nodes can't handle.
+
+Once all nodes are upgraded, **stable feature flags** must be enabled manually to complete the upgrade.
+
+## Feature Flag States
+
+| State | Description |
+|---|---|
+| `disabled` | Feature not active; old behavior in effect |
+| `enabled` | Feature active on all nodes |
+| `stable` | Cannot be disabled after enabled |
+| `experimental` | Opt-in feature, may change |
+
+## Enabling Feature Flags
+
+```bash
+# List all feature flags and their state
+rabbitmqctl list_feature_flags
+
+# Enable all stable feature flags (required after upgrade)
+rabbitmqctl enable_feature_flag all
+
+# Enable a specific flag
+rabbitmqctl enable_feature_flag <flag_name>
+
+# Check which flags must be enabled before upgrading
+rabbitmq-diagnostics check_enabled_all_feature_flags
+```
+
+## Upgrade Workflow with Feature Flags
+
+1. **Before upgrade:** Enable all currently stable feature flags on the old version
+2. **Rolling upgrade:** Upgrade nodes one at a time
+3. **After upgrade:** Enable all stable feature flags introduced in the new version
+
+Skipping step 1 may prevent the upgrade from completing (some upgrades require certain flags to be pre-enabled).
+
+## Khepri Feature Flag
+
+The `khepri_db` feature flag (introduced in 3.13, required in 4.0) enables the Khepri Raft-based metadata store to replace Mnesia. Once enabled, it cannot be disabled. Enabling `khepri_db` is a prerequisite for upgrading to RabbitMQ 4.x.
+
+## AceMQ Take
+
+**Enable all stable flags before every upgrade.** Make `rabbitmqctl enable_feature_flag all` the last step of your pre-upgrade checklist. Missing this step is the most common cause of failed rolling upgrades.
+
+**Verify flags post-upgrade.** After completing a rolling upgrade and starting all nodes on the new version, run `rabbitmqctl enable_feature_flag all` again to activate any new flags introduced in the new version.
+
+**Include feature flag state in your monitoring.** Alert if `rabbitmq_feature_flag_status{flag_name="khepri_db"} == 0` on a 4.x cluster — this means Khepri isn't enabled and the cluster may be in a degraded state.
