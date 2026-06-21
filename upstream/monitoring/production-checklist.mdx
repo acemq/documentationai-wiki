@@ -1,0 +1,80 @@
+---
+title: Production Deployment Guidelines
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Production Deployment Guidelines](https://www.rabbitmq.com/docs/production-checklist)
+
+A production RabbitMQ deployment requires attention to hardware sizing, storage, security, monitoring, and application practices. This checklist covers the most critical items.
+
+## Hardware Minimums (Per Node)
+
+- 4 CPU cores (no colocation with other I/O-heavy services)
+- 4 GiB RAM (8+ recommended for production workloads)
+- Durable local SSD storage for data directory
+- **Do not run RabbitMQ with a single CPU core or on NAS**
+
+## Storage
+
+- Use **durable local storage** (SSD/NVMe). Network-attached storage (NAS/EFS/NFS) introduces latency spikes that destabilize quorum queue Raft consensus.
+- **Overprovision disk.** Quorum queues and streams can have substantial on-disk footprint. Assume 2×–3× the expected message data volume.
+- Never share the RabbitMQ data directory between nodes.
+- Avoid distributed filesystems (CIFS, NFS, GlusterFS) for node data directories.
+
+## Networking
+
+- Disable Nagle's algorithm (`tcp_nodelay = true`) for lower latency
+- Configure OS TCP keepalives and AMQP heartbeats
+- Ensure adequate open file descriptor limits (`ulimit -n` ≥ 65536)
+- Open firewall rules for 5672/5671 (AMQP) and 25672/4369 (inter-node)
+
+## Virtual Hosts and Users
+
+- Delete the default `guest` user
+- Create per-application users with least-privilege permissions
+- Use separate vhosts per application or environment
+- Set Default Queue Type to `quorum` per vhost
+
+## Monitoring and Resource Limits
+
+- Enable `rabbitmq_prometheus` plugin
+- Set memory watermark: `vm_memory_high_watermark.relative = 0.4`
+- Set disk limit: `disk_free_limit.relative = 2.0`
+- Configure max connections and channels
+- Import official Grafana dashboards (IDs 10991, 11340)
+
+## Security
+
+- Enable TLS on all listeners
+- Restrict management port (15672) to internal networks
+- Restrict Erlang distribution port (25672) to cluster node subnets only
+- Use certificate-based auth or OAuth 2.0 for management access
+
+## Application Practices
+
+- Enable publisher confirms
+- Use manual consumer acks (`no_ack=false`)
+- Declare durable queues with `x-queue-type: quorum`
+- Set `delivery_mode: 2` for persistent messages
+- Configure DLX on all production queues
+- Set `delivery-limit` policy on quorum queues
+- Configure connection auto-recovery in all AMQP clients
+
+## Clustering
+
+- Run 3 or 5 nodes (odd number, never 2)
+- Use fast local storage for all nodes
+- Enable and verify feature flags before upgrading
+- Test rolling upgrade procedure in staging before production
+
+## AceMQ Take
+
+**Treat this checklist as a deployment gate.** Before any RabbitMQ deployment goes to production, walk through every item. Missing any of these creates a known failure mode that will surface eventually under load or during a failure scenario.
+
+**SSD is non-negotiable for quorum queues.** Quorum queue Raft consensus is latency-sensitive. NAS, spinning disk, or highly contended storage causes Raft timeouts that trigger unnecessary leader elections and instability. Fast local NVMe is the minimum viable storage for production quorum queues.
+
+**Build a pre-maintenance runbook.** Before any maintenance window (upgrade, node restart, scaling), run: check alarms, check quorum criticality, verify consumer lag is zero or acceptable, verify replica counts are healthy. These checks take 2 minutes and prevent the majority of maintenance-induced incidents.

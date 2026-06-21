@@ -1,0 +1,73 @@
+---
+title: Alarms
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Alarms](https://www.rabbitmq.com/docs/alarms)
+
+RabbitMQ uses alarms to protect against resource exhaustion. When a memory or disk alarm fires, the broker blocks all publishing connections until the resource pressure is relieved.
+
+## Memory Alarm
+
+Fires when `rabbitmq_vm_memory_usage_watermark` is exceeded (default: 40% of system RAM).
+
+```ini
+# rabbitmq.conf
+vm_memory_high_watermark.relative = 0.4  # 40% of RAM (default)
+# or absolute:
+vm_memory_high_watermark.absolute = 8GB
+```
+
+When the alarm fires:
+1. All publishing connections are **blocked** (`connection.blocked` is sent to publishers)
+2. Consuming connections continue to work
+3. The broker pages messages to disk (if possible) to free memory
+4. Publishing resumes when memory drops below the watermark (with hysteresis)
+
+## Disk Free Alarm
+
+Fires when free disk space drops below `disk_free_limit` (default: 50 MB, or 2.0× RAM if configured).
+
+```ini
+# rabbitmq.conf
+disk_free_limit.relative = 2.0  # 2x RAM (recommended)
+# or absolute:
+disk_free_limit.absolute = 20GB
+```
+
+When the disk alarm fires, the broker blocks all publishing and consuming operations — more severe than a memory alarm. This protects against complete disk fill, which would crash the node.
+
+## Checking Alarm Status
+
+```bash
+# Check alarms via CLI
+rabbitmq-diagnostics check_local_alarms  # exits non-zero if any alarm is active
+rabbitmq-diagnostics alarms              # lists active alarms with details
+
+# Via management API
+curl -u admin:pass http://localhost:15672/api/nodes | jq '.[].mem_alarm, .[].disk_free_alarm'
+```
+
+## Prometheus Alarm Metrics
+
+```promql
+# Memory alarm
+rabbitmq_alarms_memory_used_watermark == 1
+
+# Disk alarm
+rabbitmq_alarms_disk_free_watermark == 1
+```
+
+Alert immediately on any active alarm — publisher blocking has direct end-user impact.
+
+## AceMQ Take
+
+**Set disk_free_limit.relative = 2.0 or higher.** The default 50 MB absolute limit is dangerously low. Quorum queues and streams need substantial disk headroom. Set a relative limit of 2.0× RAM or an absolute limit based on your message volume. Running out of disk is a cluster-wide outage, not a warning.
+
+**Alert on alarm state, not just on alarm trigger.** A brief alarm (fires and clears quickly) is a warning. A persistent alarm (fire duration > 5 minutes) is an incident. Alert on both, with different severity levels.
+
+**Don't rely on disk alarm as your only protection.** By the time the disk alarm fires, you're already in trouble. Monitor disk utilization (e.g. `disk_free < 30% of total`) as a leading indicator and react before the alarm fires. The alarm is a last resort, not a normal operating condition.

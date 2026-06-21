@@ -1,0 +1,78 @@
+---
+title: Logging
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Logging](https://www.rabbitmq.com/docs/logging)
+
+RabbitMQ logs are critical for operational visibility, debugging, and incident investigation. Understanding log configuration and the log event taxonomy helps teams triage issues faster.
+
+## Log Configuration
+
+```ini
+# rabbitmq.conf
+log.file.level = info          # debug, info, warning, error, critical, none
+log.console = true             # also log to stdout (useful in containers)
+log.console.level = info
+log.file = /var/log/rabbitmq/rabbit.log  # default path
+```
+
+## Log Output Formats
+
+RabbitMQ supports structured logging in multiple formats:
+
+```ini
+log.file.formatter = plaintext   # human-readable (default)
+log.file.formatter = json        # structured JSON for log aggregation
+```
+
+JSON logging is recommended for environments with centralized log aggregation (ELK, Loki, CloudWatch, Datadog).
+
+## Log Categories
+
+RabbitMQ logs are organized by category. Each category can have its own log level:
+
+```ini
+log.connection.level = info        # Connection open/close events
+log.channel.level = warning        # Channel events (usually verbose at info)
+log.queue.level = info             # Queue declaration, deletion
+log.federation.level = info        # Federation topology events
+log.upgrade.level = info           # Upgrade and feature flag events
+```
+
+## Important Log Events to Watch
+
+| Log Pattern | Meaning |
+|---|---|
+| `started TCP listener on` | Listener started successfully |
+| `connection closed` | Client disconnection |
+| `connection <x.x.x.x> error` | Connection error (client misbehavior or network issue) |
+| `memory alarm` | Memory watermark triggered |
+| `disk alarm` | Disk free watermark triggered |
+| `node rabbit@xxx down` | Cluster node failure detected |
+| `quorum queue leader election` | Leader failover in progress |
+| `channel error` | Channel-level exception (often a programming error) |
+| `PRECONDITION_FAILED` | Queue/exchange property mismatch |
+
+## Log Exchange
+
+RabbitMQ can publish log messages to an AMQP exchange for programmatic processing:
+
+```ini
+log.exchange = true
+log.exchange.level = error   # only route errors to the exchange
+```
+
+Messages are published to `amq.rabbitmq.log` (a built-in topic exchange) with routing key `<category>.<level>` (e.g. `connection.warning`).
+
+## AceMQ Take
+
+**Use JSON logging in production.** Plain text logs are hard to query at scale. JSON logs integrate directly with Loki, Elasticsearch, and Datadog with field extraction. The overhead is negligible.
+
+**Aggregate logs centrally.** Ship RabbitMQ logs to your central log system (Loki, ELK, CloudWatch). Broker logs are essential during incidents — you don't want to be SSH-ing into nodes to read files during an outage.
+
+**Create alerts on key log patterns.** Set up log-based alerts for: memory alarms, disk alarms, node-down events, and PRECONDITION_FAILED errors (the latter often indicates a deployment issue where topology changed but application code didn't). Structured JSON logs make this straightforward.

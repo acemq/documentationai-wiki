@@ -1,0 +1,81 @@
+---
+title: Monitoring
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Monitoring](https://www.rabbitmq.com/docs/monitoring)
+
+Monitoring RabbitMQ is foundational to operating it reliably. The recommended stack is **Prometheus + Grafana**, supplemented by CLI-based health checks and log aggregation.
+
+## Monitoring Options
+
+| Tool | Best For |
+|---|---|
+| **Prometheus + Grafana** | Production monitoring and alerting (recommended) |
+| **Management HTTP API** | Development, ad-hoc inspection, low-scale |
+| **`rabbitmq-diagnostics`** | CLI-based health checks and troubleshooting |
+| **`rabbitmq-diagnostics observer`** | Interactive CLI for focused debugging |
+| Kubernetes Operator | Kubernetes-specific Prometheus integration |
+
+## Key Metric Categories
+
+### Node Metrics
+- `rabbitmq_process_resident_memory_bytes` — Erlang VM memory
+- `rabbitmq_erlang_processes_used` — Erlang process count
+- `rabbitmq_io_read_bytes_total`, `rabbitmq_io_write_bytes_total` — disk I/O
+- `rabbitmq_connections` — open connections
+- `rabbitmq_channels` — open channels
+- `rabbitmq_fd_used`, `rabbitmq_fd_total` — file descriptor usage
+- `rabbitmq_sockets_used` — socket count
+
+### Queue Metrics
+- `rabbitmq_queue_messages` — total messages (ready + unacked)
+- `rabbitmq_queue_messages_ready` — messages waiting for consumers
+- `rabbitmq_queue_messages_unacked` — delivered but not yet acked
+- `rabbitmq_queue_consumers` — consumer count
+- `rabbitmq_queue_messages_published_total` — publish rate
+- `rabbitmq_queue_messages_delivered_total` — delivery rate
+- `rabbitmq_queue_messages_acked_total` — ack rate
+
+### Cluster Metrics
+- `rabbitmq_identity_info` — node identity and version
+- `rabbitmq_cluster_nodes` — known cluster nodes
+- `rabbitmq_alarms_memory_used_watermark` — memory alarm state
+- `rabbitmq_alarms_disk_free_watermark` — disk alarm state
+
+## Health Checks
+
+```bash
+# Is the node alive?
+rabbitmq-diagnostics check_running
+
+# Is the node accepting connections?
+rabbitmq-diagnostics check_port_connectivity
+
+# Are there any alarms?
+rabbitmq-diagnostics check_local_alarms
+
+# Is this node quorum-critical (safe to take down)?
+rabbitmq-diagnostics check_if_node_is_quorum_critical
+
+# Is the virtual host accessible?
+rabbitmq-diagnostics check_virtual_hosts
+```
+
+## Monitoring Frequency
+
+- Prometheus scrape: every 15 seconds (default `rabbitmq_prometheus` interval)
+- Health checks: every 30–60 seconds
+- Log aggregation: real-time (tail or syslog-forward)
+
+## AceMQ Take
+
+**Install the official RabbitMQ Grafana dashboards.** Grafana.com has official RabbitMQ dashboards (IDs 10991 and 11340) that cover all key metrics out of the box. Import them first; customize later.
+
+**Alert on queue depth, not just node health.** A healthy node with a growing queue is already in trouble. Set alerts on `rabbitmq_queue_messages_ready > threshold` per queue, not just on `check_running`. The former catches capacity problems before they become availability problems.
+
+**Separate consumer-side metrics.** Monitor ack rate from the consumer side (application metrics) alongside delivery rate from the broker side. A divergence between delivery rate and ack rate is a leading indicator of consumer starvation or slowdown.

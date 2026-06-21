@@ -1,0 +1,76 @@
+---
+title: Management Plugin
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Management Plugin](https://www.rabbitmq.com/docs/management)
+
+The `rabbitmq_management` plugin provides an HTTP-based management API, a web UI, and `rabbitmqadmin` CLI tool. It is the primary interface for administrative and development operations.
+
+## Enabling Management
+
+```bash
+rabbitmq-plugins enable rabbitmq_management
+```
+
+Web UI: `http://<node>:15672/`
+HTTP API: `http://<node>:15672/api/`
+API docs: `http://<node>:15672/api/index.html`
+
+## Key HTTP API Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/overview` | GET | Cluster overview, node counts, message rates |
+| `/api/nodes` | GET | Per-node resource usage |
+| `/api/queues` | GET | All queues across all vhosts |
+| `/api/queues/<vhost>/<name>` | GET/DELETE | Specific queue details or delete |
+| `/api/exchanges/<vhost>/<name>` | GET/PUT/DELETE | Exchange operations |
+| `/api/bindings/<vhost>` | GET/POST | List or create bindings |
+| `/api/vhosts` | GET/PUT/DELETE | Vhost management |
+| `/api/users` | GET/PUT/DELETE | User management |
+| `/api/permissions/<vhost>/<user>` | GET/PUT/DELETE | Permission management |
+| `/api/definitions` | GET/POST | Export/import definitions |
+| `/api/policies/<vhost>` | GET/PUT/DELETE | Policy management |
+| `/api/queues/<vhost>/<name>/get` | POST | Get messages from queue (diagnostic only) |
+| `/api/queues/<vhost>/<name>/purge` | DELETE | Purge queue contents |
+
+## rabbitmqadmin CLI
+
+`rabbitmqadmin` is a Python-based CLI that wraps the HTTP API:
+
+```bash
+# Download from running broker
+curl http://localhost:15672/cli/rabbitmqadmin > rabbitmqadmin
+chmod +x rabbitmqadmin
+
+# Common operations
+rabbitmqadmin list queues
+rabbitmqadmin list exchanges
+rabbitmqadmin declare queue name=my-queue durable=true
+rabbitmqadmin publish exchange=amq.direct routing_key=my-queue payload="test"
+rabbitmqadmin get queue=my-queue count=10
+rabbitmqadmin export definitions.json
+rabbitmqadmin import definitions.json
+```
+
+## Rate Limiting and Performance
+
+The management API aggregates statistics in memory. In clusters with many queues and high message rates, the management plugin adds CPU and memory overhead. For production metrics, prefer Prometheus (`rabbitmq_prometheus`) over the management API.
+
+Configure the statistics interval:
+```ini
+management.rates_mode = none  # disable rate stats to reduce overhead
+```
+
+## AceMQ Take
+
+**Management API for admin tasks, Prometheus for metrics.** Don't poll `/api/queues` for monitoring — it's expensive and not designed for scraping. Use Prometheus for metrics and save the management API for operational tasks (declare queues, set policies, inspect bindings).
+
+**Restrict management port.** Port 15672 is for admin use only. Never expose it to the internet. Bind it to an internal interface or put it behind a VPN/internal load balancer with authentication.
+
+**`rabbitmqadmin` for IaC operations.** Use `rabbitmqadmin` in CI/CD pipelines for topology validation: verify that queues declared in your application exist in the target environment before deployment. It's also the fastest way to inspect topology from the command line.

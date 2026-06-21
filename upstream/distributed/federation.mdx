@@ -1,0 +1,74 @@
+---
+title: Federation Plugin
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Federation Plugin](https://www.rabbitmq.com/docs/federation)
+
+Federation allows exchanges and queues on one RabbitMQ broker to receive messages from exchanges on another broker. Unlike Shovel (which actively pulls), federation uses a subscription model: the downstream broker subscribes to messages from the upstream broker.
+
+## Federation vs. Shovel
+
+| Aspect | Federation | Shovel |
+|---|---|---|
+| Trigger | Subscription-based (upstream pushes) | Active consumer (downstream pulls) |
+| Message routing | Federated exchange routing rules | Direct queue-to-exchange |
+| Best for | Geographically distributed deployments, hub-and-spoke | Point-to-point migration, queue drain |
+| Topology awareness | Yes — respects exchange types and bindings | No — just source queue to dest exchange |
+| Automatic | Yes — activated by policy | Yes — activated by parameter |
+
+## Enabling Federation
+
+```bash
+rabbitmq-plugins enable rabbitmq_federation rabbitmq_federation_management
+```
+
+## Configuring Federation
+
+**Step 1: Define an upstream**
+```bash
+rabbitmqctl set_parameter federation-upstream my-upstream \
+  '{"uri": "amqp://user:pass@upstream-host",
+    "prefetch-count": 100,
+    "reconnect-delay": 5,
+    "ack-mode": "on-confirm",
+    "expires": 3600000}'
+```
+
+**Step 2: Apply a federation policy**
+```bash
+rabbitmqctl set_policy federate-events "^events\." \
+  '{"federation-upstream": "my-upstream"}' \
+  --apply-to exchanges
+```
+
+Now any message published to the `events.*` exchange on the upstream broker will be federated to the downstream broker.
+
+## Exchange Federation
+
+Federated exchanges propagate messages from upstream exchanges to downstream exchanges. The downstream broker creates an internal consumer on the upstream and republishes messages based on the downstream bindings. Only messages that match bindings on the downstream exchange are fetched from upstream.
+
+## Queue Federation
+
+Federated queues form a distributed queue across multiple brokers — consumers on the downstream can receive messages from the upstream queue when local messages are exhausted.
+
+This creates a loosely federated queue system, not a single replicated queue.
+
+## Federation Status
+
+```bash
+rabbitmqctl federation_status
+# or via management UI: Admin > Federation Status
+```
+
+## AceMQ Take
+
+**Federation for multi-datacenter event streaming.** When multiple regional deployments each need a local copy of global events, federation is more efficient than Shovel — the upstream only sends messages that downstream bindings actually want (binding-aware routing).
+
+**Federation for hub-and-spoke architectures.** A central hub broker can federate exchanges to spoke brokers in regional offices or data centers. Spokes consume locally, but messages can be published to any spoke or the hub and propagate across the federation.
+
+**Monitor federation links.** Federation uses AMQP connections under the hood. Monitor federation link state and reconnect frequency. A federation link that reconnects frequently indicates network instability or upstream availability issues.

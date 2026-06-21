@@ -1,0 +1,94 @@
+---
+title: Prometheus and Grafana
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.8 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Prometheus and Grafana](https://www.rabbitmq.com/docs/prometheus)
+
+The `rabbitmq_prometheus` plugin exposes a Prometheus-compatible metrics endpoint. Combined with Grafana dashboards, this is the recommended production monitoring stack for RabbitMQ.
+
+## Enabling the Plugin
+
+```bash
+rabbitmq-plugins enable rabbitmq_prometheus
+```
+
+Metrics endpoint: `http://<node>:15692/metrics`
+
+Alternate per-object endpoint (individual queue/channel metrics): `http://<node>:15692/metrics/per-object`
+
+## Prometheus Scrape Config
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: rabbitmq
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+        - rmq-node-1:15692
+        - rmq-node-2:15692
+        - rmq-node-3:15692
+    metrics_path: /metrics
+```
+
+For Kubernetes, use a ServiceMonitor (Prometheus Operator) or PodMonitor:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: rabbitmq
+spec:
+  podMetricsEndpoints:
+  - port: prometheus
+    interval: 15s
+    path: /metrics
+```
+
+## Key Prometheus Metrics for Alerting
+
+```promql
+# Memory alarm active
+rabbitmq_alarms_memory_used_watermark == 1
+
+# Disk alarm active
+rabbitmq_alarms_disk_free_watermark == 1
+
+# Queue depth (messages ready to be consumed)
+rabbitmq_queue_messages_ready > 10000
+
+# Consumer count dropped to zero
+rabbitmq_queue_consumers == 0
+
+# File descriptor usage approaching limit
+rabbitmq_fd_used / rabbitmq_fd_total > 0.85
+
+# Dead letter queue growing
+rate(rabbitmq_queue_messages_dead_lettered_total[5m]) > 10
+```
+
+## Official Grafana Dashboards
+
+| Dashboard | Grafana ID | Contents |
+|---|---|---|
+| RabbitMQ Overview | 10991 | Cluster-level metrics, node health, queue overview |
+| RabbitMQ Quorum Queues | 11340 | Quorum queue Raft metrics, per-queue depth |
+
+Import directly from grafana.com in the Grafana UI.
+
+## Per-Object Metrics
+
+The `/metrics/per-object` endpoint exposes per-queue, per-channel, and per-connection metrics. These are expensive in clusters with many queues — scrape at a lower frequency (e.g. 60s) or selectively filter in Prometheus.
+
+## AceMQ Take
+
+**Scrape all cluster nodes, not just one.** Each node only knows about its own local state for some metrics. To get a complete cluster picture, scrape all nodes and use PromQL aggregation (sum by cluster, avg across nodes).
+
+**Use recording rules for expensive PromQL.** Queries like `sum(rate(rabbitmq_queue_messages_acked_total[5m]))` across hundreds of queues are expensive to evaluate. Use Prometheus recording rules to pre-compute them and keep dashboards fast.
+
+**Don't scrape `/metrics/per-object` too frequently.** At high queue counts (1000+), per-object metric generation is expensive. Scrape the standard `/metrics` endpoint at 15s and per-object at 60s or less frequently.

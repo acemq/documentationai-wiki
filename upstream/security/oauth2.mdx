@@ -1,0 +1,70 @@
+---
+title: OAuth 2.0 Authentication
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.11 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [OAuth 2.0](https://www.rabbitmq.com/docs/oauth2)
+
+RabbitMQ supports OAuth 2.0 / JWT token-based authentication via the `rabbitmq_auth_backend_oauth2` plugin. This enables integration with identity providers like Keycloak, Okta, Azure AD, and Auth0.
+
+## How It Works
+
+1. Client obtains a JWT access token from the OAuth 2.0 identity provider
+2. Client presents the JWT as the password in the PLAIN mechanism (username ignored or set to token)
+3. RabbitMQ validates the JWT signature against the configured JWKS endpoint
+4. RabbitMQ maps JWT claims to vhost permissions and user tags
+
+## Configuration
+
+```ini
+auth_backends.1 = rabbit_auth_backend_oauth2
+
+auth_oauth2.resource_server_id = my-rabbitmq
+auth_oauth2.issuer = https://auth.example.com/realms/myrealm
+auth_oauth2.jwks_url = https://auth.example.com/realms/myrealm/protocol/openid-connect/certs
+```
+
+## JWT Claims Mapping
+
+RabbitMQ reads vhost permissions from JWT claims. The claim structure uses scope-style permissions:
+
+```json
+{
+  "sub": "my-service",
+  "scope": [
+    "rabbitmq.read:my-vhost/my-queue",
+    "rabbitmq.write:my-vhost/my-exchange",
+    "rabbitmq.configure:my-vhost/my-queue"
+  ]
+}
+```
+
+Or via a nested `rabbitmq` claim structure (format depends on plugin version and IdP configuration).
+
+## Management UI with OAuth 2.0
+
+With OAuth 2.0 configured, the management UI can redirect users to the IdP for login:
+
+```ini
+management.oauth_enabled = true
+management.oauth_client_id = rabbitmq-management
+management.oauth_provider_url = https://auth.example.com
+```
+
+Users authenticate via the IdP and are redirected back to the management UI with a token.
+
+## Token Expiry
+
+JWT tokens have expiry (`exp` claim). RabbitMQ validates expiry on each authentication. Clients must obtain fresh tokens before expiry to maintain connections.
+
+## AceMQ Take
+
+**OAuth 2.0 for human management access.** Use OAuth 2.0 for anyone who needs to access the management UI. This provides SSO, MFA enforcement, and audit logging via your existing identity provider — without managing per-user credentials in RabbitMQ.
+
+**mTLS + EXTERNAL for service-to-service.** OAuth 2.0 is excellent for human users but adds token renewal complexity for long-running services. For service accounts, mTLS certificate authentication is simpler and more reliable.
+
+**Short token lifetimes + rotation.** Configure short JWT expiry (15–60 minutes) and ensure clients rotate tokens proactively. A token that expires while a connection is open doesn't immediately break the connection, but new connections will fail until a fresh token is obtained.

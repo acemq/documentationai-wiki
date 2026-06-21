@@ -1,0 +1,74 @@
+---
+title: Federated Exchanges
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Federated Exchanges](https://www.rabbitmq.com/docs/federated-exchanges)
+
+Federated exchanges are the primary federation mechanism. A federated exchange subscribes to messages from an upstream exchange, with binding-aware routing — only messages matching the downstream bindings are federated.
+
+## How Federated Exchanges Work
+
+1. A policy marks exchange `E` on the downstream as federated with upstream U
+2. The downstream broker connects to upstream U and creates a private queue bound to the upstream's exchange `E`
+3. When bindings are added to the downstream exchange `E`, corresponding bindings are created on the upstream private queue
+4. The upstream sends only messages that match the downstream's bindings
+5. Messages arrive at downstream `E` and are routed to local queues
+
+**Key property:** The upstream only sends messages that the downstream actually wants. This makes exchange federation bandwidth-efficient for selective subscription patterns.
+
+## Upstream Propagation Depth
+
+Federation cycles and propagation are controlled by the `max-hops` parameter:
+
+```bash
+rabbitmqctl set_parameter federation-upstream my-upstream \
+  '{"uri": "amqp://upstream-host",
+    "max-hops": 1}'
+```
+
+- `max-hops = 1` (default) — messages are federated once; no re-propagation
+- `max-hops = N` — messages can traverse up to N federation links
+
+For chain topologies (A → B → C), set `max-hops = 2` on C to receive from A via B.
+
+## Federated Exchange Types
+
+Federated exchanges respect the type of both the upstream and downstream exchanges:
+- A `topic` federated exchange on the downstream subscribes with the downstream's binding patterns
+- A `fanout` upstream sends all messages; the downstream `topic` exchange filters locally
+
+## Federation Policy Configuration
+
+```bash
+# Federate all exchanges matching "global.*"
+rabbitmqctl set_policy federate-global "^global\." \
+  '{"federation-upstream-set": "my-upstream-set"}' \
+  --apply-to exchanges
+
+# Or use a single upstream
+rabbitmqctl set_policy federate-events "^events\." \
+  '{"federation-upstream": "my-upstream"}' \
+  --apply-to exchanges
+```
+
+## Upstream Sets
+
+An upstream set groups multiple upstreams, allowing a single policy to federate from multiple sources:
+
+```bash
+rabbitmqctl set_parameter federation-upstream-set all-regions \
+  '[{"upstream": "us-east"}, {"upstream": "eu-west"}, {"upstream": "ap-south"}]'
+```
+
+## AceMQ Take
+
+**Federated exchanges for global event distribution.** In a multi-region deployment where each region has a local RabbitMQ cluster, federated exchanges allow a central event bus to distribute events globally. Regional consumers receive only the events they're bound to — no unnecessary cross-region traffic.
+
+**Binding propagation has latency.** When a new binding is added to a downstream federated exchange, it takes a moment for the binding to propagate to the upstream. During this window, messages matching the new binding may not be federated. For critical bindings, verify federation link state after adding.
+
+**Combine with definitions export for DR.** Federation upstream definitions are stored as runtime parameters. Ensure they're captured in your definitions export for disaster recovery. In a DR failover scenario, importing definitions restores federation configuration automatically.

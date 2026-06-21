@@ -1,0 +1,79 @@
+---
+title: Authentication
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Authentication](https://www.rabbitmq.com/docs/authentication)
+
+RabbitMQ authentication verifies who is connecting. Multiple authentication mechanisms (SASL) and backends are supported and can be stacked.
+
+## SASL Mechanisms
+
+| Mechanism | Description |
+|---|---|
+| `PLAIN` | Username + password in cleartext (use over TLS only) |
+| `AMQPLAIN` | RabbitMQ-specific variant of PLAIN |
+| `EXTERNAL` | Client certificate-based (mTLS); username derived from cert |
+| `RABBIT-CR-DEMO` | Challenge-response (demo only; not for production) |
+
+```ini
+# rabbitmq.conf
+auth_mechanisms.1 = PLAIN
+auth_mechanisms.2 = EXTERNAL  # enable for mTLS certificate login
+```
+
+## Authentication Backends
+
+RabbitMQ chains authentication backends — each is tried in order:
+
+```ini
+auth_backends.1 = rabbit_auth_backend_internal  # built-in user DB
+auth_backends.2 = rabbit_auth_backend_ldap       # LDAP
+auth_backends.3 = rabbit_auth_backend_oauth2     # OAuth 2.0 / JWT
+auth_backends.4 = rabbit_auth_backend_http       # HTTP-based custom backend
+```
+
+### Internal Backend
+
+Default. Users and password hashes stored in the Khepri metadata store. Suitable for most deployments.
+
+### EXTERNAL (Certificate-Based)
+
+With mTLS enabled, clients can authenticate using their client certificate. The username is derived from the certificate's Common Name (CN) or Distinguished Name (DN):
+
+```ini
+ssl_cert_login_from = common_name  # or distinguished_name
+```
+
+No password is needed — the certificate is the credential.
+
+### HTTP Backend
+
+The `rabbitmq_auth_backend_http` plugin delegates authentication to an external HTTP service. Useful for custom identity systems:
+
+```ini
+auth_backends.1 = rabbit_auth_backend_http
+auth_http.user_path    = https://auth.internal/api/rabbitmq/user
+auth_http.vhost_path   = https://auth.internal/api/rabbitmq/vhost
+auth_http.resource_path = https://auth.internal/api/rabbitmq/resource
+auth_http.topic_path   = https://auth.internal/api/rabbitmq/topic
+```
+
+## Password Hashing
+
+RabbitMQ stores passwords as salted hashes. Default algorithm is SHA-256. Algorithms:
+- `rabbit_password_hashing_sha256` (default)
+- `rabbit_password_hashing_sha512`
+- `rabbit_password_hashing_md5` (legacy only)
+
+## AceMQ Take
+
+**Never use PLAIN over cleartext.** PLAIN sends credentials in cleartext. Always pair it with TLS. In production, TLS should be mandatory for all connections anyway.
+
+**Prefer EXTERNAL for service-to-service.** When all services run in a PKI-managed environment (Kubernetes with cert-manager, Vault with PKI secrets engine), mTLS + EXTERNAL authentication eliminates credential management entirely. No passwords to rotate, no secrets to leak.
+
+**Use OAuth 2.0 for human users.** For teams that need management UI access, OAuth 2.0 with your existing identity provider (Okta, Keycloak, Azure AD) provides SSO and avoids per-user password management in RabbitMQ.

@@ -1,0 +1,77 @@
+---
+title: Dynamic Shovel
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Dynamic Shovel](https://www.rabbitmq.com/docs/shovel-dynamic)
+
+Dynamic shovels are created at runtime via the management HTTP API or `rabbitmqctl`, without requiring a broker restart. They are stored as runtime parameters and persist through restarts.
+
+## Creating a Dynamic Shovel
+
+```bash
+rabbitmqctl set_parameter shovel my-shovel \
+  '{"src-protocol": "amqp091",
+    "src-uri": "amqp://user:pass@source-host",
+    "src-queue": "source-queue",
+    "dest-protocol": "amqp091",
+    "dest-uri": "amqp://user:pass@dest-host",
+    "dest-exchange": "dest-exchange",
+    "dest-exchange-key": "shovel.forwarded",
+    "ack-mode": "on-confirm",
+    "src-prefetch-count": 100,
+    "reconnect-delay": 5}'
+```
+
+## Managing Dynamic Shovels
+
+```bash
+# List shovels
+rabbitmqctl list_parameters shovel
+
+# Delete a shovel
+rabbitmqctl clear_parameter shovel my-shovel
+
+# Check shovel status
+rabbitmqctl shovel_status
+```
+
+## Dynamic Shovel Parameters
+
+| Parameter | Description |
+|---|---|
+| `src-uri` | AMQP URI for source broker |
+| `src-queue` | Source queue name |
+| `src-prefetch-count` | Consumer prefetch (throughput tuning) |
+| `dest-uri` | AMQP URI for destination broker |
+| `dest-exchange` | Destination exchange (or use `dest-queue`) |
+| `dest-exchange-key` | Routing key for destination |
+| `ack-mode` | `on-confirm` (safe), `on-publish`, or `no-ack` |
+| `reconnect-delay` | Seconds to wait before reconnecting after failure |
+| `delete-after` | `never` (default), `queue-length` (stop when source is drained), or count |
+
+## Delete-After: Queue Drain Pattern
+
+To drain a queue and then automatically stop the Shovel:
+
+```bash
+rabbitmqctl set_parameter shovel drain-old-queue \
+  '{"src-uri": "...", "src-queue": "old-queue",
+    "dest-uri": "...", "dest-queue": "new-queue",
+    "ack-mode": "on-confirm",
+    "delete-after": "queue-length"}'
+```
+
+With `delete-after: queue-length`, the Shovel reads exactly as many messages as were in the queue when it started, then stops and deletes itself.
+
+## AceMQ Take
+
+**Dynamic shovels for ad-hoc operations.** For one-time operations (queue migration, incident recovery, blue-green drain), dynamic shovels are faster to set up than static configuration changes requiring a restart.
+
+**Use `delete-after: queue-length` for controlled drains.** When migrating a queue to a new name or cluster, `delete-after: queue-length` provides a clean stop condition — the Shovel processes exactly the messages that existed at start time and then self-terminates. Verify source queue depth hits zero after completion.
+
+**Store dynamic shovel configs in IaC.** Dynamic shovels are stored as runtime parameters, so they're included in definitions exports. Track them in your definitions JSON or document them as code — a Shovel you created manually during an incident and forgot about is a configuration debt.

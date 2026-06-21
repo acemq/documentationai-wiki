@@ -1,0 +1,87 @@
+---
+title: Shovel Plugin
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Shovel Plugin](https://www.rabbitmq.com/docs/shovel)
+
+The Shovel plugin moves messages from a source queue on one RabbitMQ broker to a destination exchange (or queue) on the same or a different broker. Shovel consumes from the source and republishes to the destination with publisher confirms, providing reliable inter-broker message transfer.
+
+## Use Cases
+
+- **Cross-cluster message moving** — move messages between prod and DR clusters
+- **Blue-green upgrades** — drain messages from old cluster to new cluster during upgrade
+- **Cross-datacenter routing** — forward messages from edge to central broker
+- **Queue migration** — move messages from one queue to another (different name, vhost, or type)
+
+## Enabling Shovel
+
+```bash
+rabbitmq-plugins enable rabbitmq_shovel rabbitmq_shovel_management
+```
+
+## Static Shovel Configuration
+
+Static shovels are defined in `rabbitmq.conf` / `advanced.config` and start automatically:
+
+```erlang
+% advanced.config
+[
+  {rabbitmq_shovel, [
+    {shovels, [
+      {my_shovel, [
+        {source, [
+          {protocol, amqp091},
+          {uris, ["amqp://user:pass@source-host"]},
+          {declarations, []},
+          {queue, <<"source-queue">>},
+          {prefetch_count, 100}
+        ]},
+        {destination, [
+          {protocol, amqp091},
+          {uris, ["amqp://user:pass@dest-host"]},
+          {publish_properties, [{delivery_mode, 2}]},
+          {exchange, <<"dest-exchange">>},
+          {routing_key, <<"shovel.forwarded">>}
+        ]},
+        {ack_mode, on_confirm},  % wait for dest confirm before acking source
+        {reconnect_delay, 5}
+      ]}
+    ]}
+  ]}
+].
+```
+
+## Dynamic Shovel Configuration
+
+Dynamic shovels are created at runtime via the management API or CLI. See the [Dynamic Shovel](https://www.rabbitmq.com/docs/shovel-dynamic) guide.
+
+## Ack Modes
+
+| Mode | Behavior |
+|---|---|
+| `on_confirm` | Ack source only after destination confirms. Safest — at-least-once. |
+| `on_publish` | Ack source when published to destination (before confirm). Faster but risky. |
+| `no_ack` | Auto-ack at source. Fastest but can lose messages. |
+
+Always use `on_confirm` in production.
+
+## Shovel Status
+
+```bash
+rabbitmqctl shovel_status
+# or
+rabbitmqadmin list shovels
+```
+
+## AceMQ Take
+
+**Shovel is the safest message migration tool.** When you need to move messages between queues or clusters, Shovel with `on_confirm` provides at-least-once delivery guarantees. Manual re-publication or queue dumps lose messages.
+
+**Use Shovel for blue-green upgrades.** The recommended blue-green upgrade pattern uses Shovel to drain messages from the old cluster to the new one. Size the Shovel prefetch for throughput and monitor the source queue depth to know when drain is complete.
+
+**Monitor Shovel state.** A Shovel that's stopped or in a broken state silently stops moving messages. Alert on Shovel state != `running`. The `rabbitmq_shovel_*` Prometheus metrics track Shovel activity.

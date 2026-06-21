@@ -1,0 +1,67 @@
+---
+title: Flow Control
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Flow Control](https://www.rabbitmq.com/docs/flow-control)
+
+RabbitMQ implements flow control to prevent fast publishers from overwhelming slow consumers or exhausting broker resources. Flow control operates at multiple levels.
+
+## Credit-Based Flow Control (Internal)
+
+RabbitMQ uses an internal credit-based flow control mechanism between internal processes. Each process (connection reader, channel, queue process) has a credit balance. When a process sends messages downstream, it spends credits. When credits run out, the process blocks and waits for credit refills from downstream.
+
+This propagates backpressure from slow consumers up through queue processes to channels and eventually to connection readers, which slows down publishers.
+
+**Observable effect:** publishing connections appear slow or unresponsive when consumer throughput drops. This is correct behavior — the system is self-regulating.
+
+## Connection-Level Blocking
+
+When a memory or disk alarm fires, the broker sends `connection.blocked` to all publishing connections. Publishers should listen for this notification and pause publishing:
+
+```java
+// Java client example
+connection.addBlockedListener(new BlockedListener() {
+    public void handleBlocked(String reason) {
+        // Pause publishing
+        publishingPaused = true;
+    }
+    public void handleUnblocked() {
+        // Resume publishing
+        publishingPaused = false;
+    }
+});
+```
+
+## Per-Channel Publisher Confirms
+
+Publisher confirms act as application-level flow control. By limiting the number of unconfirmed messages in-flight (the confirm window), publishers naturally throttle their rate to match broker processing capacity.
+
+## Consumer Prefetch
+
+Prefetch (`basic.qos`) is consumer-side flow control — it limits how many unacked messages a consumer receives before the broker waits for acknowledgements. This prevents fast brokers from overwhelming slow consumers.
+
+## Monitoring Flow Control
+
+```bash
+# Check which connections are blocked
+rabbitmqctl list_connections client_properties state blocked_by
+```
+
+Prometheus:
+```promql
+# Count of blocked connections
+rabbitmq_connections_blocked
+```
+
+## AceMQ Take
+
+**Connection blocking is a symptom, not a root cause.** When publishers are blocked, the root cause is either: resource exhaustion (memory/disk alarm) or consumer lag (slow consumers, not enough consumers, consumers with errors). Diagnose the root cause before trying to work around blocking.
+
+**Design publishers for backpressure.** Your publishing code should handle `connection.blocked` gracefully: stop publishing, optionally queue locally, resume on `connection.unblocked`. Publishers that ignore blocking end up buffering in application memory, masking the problem until the application OOMs.
+
+**Don't chase flow control tuning without addressing root cause.** Tuning memory watermarks higher or decreasing publisher throughput are band-aids. The sustainable fix is either more consumers, faster consumers, or less publisher throughput.
