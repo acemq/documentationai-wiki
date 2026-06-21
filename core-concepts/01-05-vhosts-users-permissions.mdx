@@ -1,0 +1,72 @@
+---
+title: vHosts, Users & Permissions
+section: 01 — Core Concepts
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# vHosts, Users & Permissions
+
+## Virtual hosts
+
+A vHost is a namespace that isolates exchanges, queues, and bindings. Think of it as a logical RabbitMQ broker within a physical broker:
+
+- Resources in different vHosts cannot communicate directly
+- Permissions are scoped per vHost per user
+- The default vHost is `/` (forward slash)
+
+```bash
+# Create a vHost
+rabbitmqctl add_vhost payments
+
+# List vHosts
+rabbitmqctl list_vhosts
+```
+
+## User management
+
+```bash
+# Add a user
+rabbitmqctl add_user app_payments "<strong-password>"
+
+# Grant permissions on a vHost
+rabbitmqctl set_permissions -p payments app_payments ".*" ".*" ".*"
+#                                                     configure  write  read
+
+# Set management UI role (optional)
+rabbitmqctl set_user_tags app_payments management
+```
+
+## Permission model
+
+Each user–vHost pair has three independent permission regexes:
+
+| Permission | Grants access to |
+|---|---|
+| **configure** | Creating/deleting exchanges, queues, bindings |
+| **write** | Publishing messages (basic.publish) |
+| **read** | Consuming messages (basic.get, basic.consume) |
+
+`".*"` matches all resources. `"^orders\\..+"` matches only resources starting with `orders.`.
+
+## Least-privilege pattern
+
+```bash
+# Publisher: write-only to a specific exchange
+rabbitmqctl set_permissions -p payments publisher_svc "" "^orders\.exchange$" ""
+
+# Consumer: read-only from a specific queue  
+rabbitmqctl set_permissions -p payments consumer_svc "" "" "^orders\.queue$"
+
+# Admin: full access
+rabbitmqctl set_permissions -p payments admin_svc ".*" ".*" ".*"
+```
+
+## AceMQ Take
+
+- One vHost per application team or microservice boundary — not one global `/` for everything.
+- Service accounts should never have management UI tags unless they need it.
+- Rotate service account passwords via your secrets manager; never hardcode in app config.
+- `rabbitmqctl list_permissions -p <vhost>` is your weekly audit command.

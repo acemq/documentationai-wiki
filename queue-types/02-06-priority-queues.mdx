@@ -1,0 +1,63 @@
+---
+title: Priority Queues
+section: 02 — Queue Types
+layer: L3
+audience: [developer, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Priority Queues
+
+## Overview
+
+RabbitMQ classic queues support priority scheduling via the `x-max-priority` argument. Messages with higher priority values are delivered before lower-priority messages when the consumer is backlogged.
+
+**Priority queues are classic queue only.** Quorum queues and streams do not support priority scheduling.
+
+## Declaring a priority queue
+
+```python
+channel.queue_declare(
+    queue="jobs",
+    durable=True,
+    arguments={
+        "x-queue-type": "classic",  # required
+        "x-max-priority": 10        # 1–255; keep small (see below)
+    }
+)
+```
+
+## Publishing with priority
+
+```python
+channel.basic_publish(
+    exchange="",
+    routing_key="jobs",
+    body=job_payload,
+    properties=pika.BasicProperties(priority=8)  # 0–10
+)
+```
+
+Messages with no `priority` property set default to priority 0.
+
+## Performance considerations
+
+- RabbitMQ maintains separate sub-queues for each priority level
+- A queue with `x-max-priority: 10` has 10 sub-queues internally
+- **Keep priority range small (≤ 10).** A large range (e.g. 255) creates 255 sub-queues with significant memory overhead
+- Priority only matters when the queue is **backlogged**. If consumers keep up, all messages deliver in order regardless of priority
+
+## When priority queues make sense
+
+✅ Background job systems where some jobs are urgent (payment processing > report generation)
+✅ Alert triage systems where severity determines processing order
+✅ Rate-limited API integrations where you want VIP customers served first
+
+❌ High-throughput, low-latency pipelines where queue depth rarely grows
+❌ Workloads that need HA — combine with quorum queues is not possible
+
+## AceMQ Take
+
+- If your workload needs both HA and priority, implement priority at the application layer: use separate quorum queues per priority tier and a dispatcher that drains higher-priority queues first.
+- `x-max-priority: 5` is sufficient for most "low / normal / high / urgent / critical" hierarchies.

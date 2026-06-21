@@ -1,0 +1,61 @@
+---
+title: VMware Virtualization
+section: 03 — Architecture
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# VMware Virtualization
+
+## Key considerations
+
+Running RabbitMQ on VMware vSphere requires attention to several hypervisor behaviors that can harm RabbitMQ cluster stability.
+
+## Memory ballooning and swapping
+
+VMware memory ballooning (`vmmemctl`) can cause the guest OS to page out RabbitMQ's message index and Erlang heap, leading to severe latency spikes.
+
+**Mitigations:**
+- Reserve full VM memory (`Memory Reservation = VM Memory Size`)
+- Disable memory ballooning for RabbitMQ VMs
+- Set swap file policy to "Guest OS controls swapping"
+
+## vMotion and live migration
+
+VM live migration suspends the VM briefly. RabbitMQ nodes can interpret the pause as a network partition:
+
+- A VM paused for > `net_ticktime / 4` seconds may be declared dead by peers
+- Peers may trigger quorum elections
+- After vMotion completes, the node rejoins and syncs via Raft
+
+**Mitigations:**
+- Increase `net_ticktime` to 60s or higher for environments with frequent vMotion
+- Schedule vMotion during maintenance windows
+- Use DRS rules to prevent all RabbitMQ VMs from moving simultaneously
+
+## vSphere DRS anti-affinity rules
+
+Create VM anti-affinity rules to ensure RabbitMQ nodes land on separate physical hosts:
+
+```
+vSphere Client: 
+Cluster > Configure > VM/Host Rules > Add Rule
+  Type: Separate Virtual Machines
+  Members: rabbitmq-node-1, rabbitmq-node-2, rabbitmq-node-3
+```
+
+Without anti-affinity rules, all 3 nodes could land on the same physical host — a host failure loses the entire cluster.
+
+## Storage
+
+- Use VMDKs on SSD/NVMe datastores for RabbitMQ data and WAL volumes
+- Avoid thin-provisioned VMDKs for RabbitMQ data volumes; zero-fill on write creates latency spikes
+- Use thick-eager-zeroed VMDKs for predictable I/O latency
+
+## AceMQ Take
+
+- Memory reservation is not optional for production RabbitMQ VMs on vSphere.
+- Coordinate with your VMware team before any planned vMotion or DRS operation on RabbitMQ nodes.
+- Consider `net_ticktime = 30` as a compromise between fast failure detection and vMotion resilience.

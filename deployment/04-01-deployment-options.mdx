@@ -1,0 +1,49 @@
+---
+title: Deployment Options
+section: 04 — Deployment
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Deployment Options
+
+## Option comparison
+
+| Option | Best for | Operational overhead |
+|---|---|---|
+| **Kubernetes Operator** | Cloud-native orgs, GitOps workflows | Low (operator manages lifecycle) |
+| **Docker Compose** | Local dev, single-host staging | Very low |
+| **Ansible** | Bare metal, VM provisioning | Medium |
+| **Terraform + cloud VM** | Cloud VM infrastructure | Medium |
+| **Bare metal** | Maximum throughput, cost-sensitive | High |
+| **RabbitMQ as a Service** | Teams without ops capacity | Minimal |
+
+## Package options
+
+| Package | Notes |
+|---|---|
+| `rabbitmq-server` (apt/rpm) | Official Debian/RPM packages from Team RabbitMQ |
+| `rabbitmq` (Docker Hub) | Official Docker image; use `-management` variant for UI |
+| Kubernetes Operator | Helm chart + CRD; handles StatefulSet, PVC, upgrades |
+| Homebrew (macOS) | Dev only; `brew install rabbitmq` |
+
+## Erlang version pinning
+
+Always pin Erlang to a specific version. Erlang upgrades can break plugin ABI compatibility:
+
+```bash
+# On Debian/Ubuntu (using Team RabbitMQ's apt repository)
+apt-get install -y erlang-base=1:26.2.5-1
+apt-get install -y rabbitmq-server=3.13.7-1
+
+# Pin to prevent unintended upgrades
+apt-mark hold erlang-base rabbitmq-server
+```
+
+## AceMQ Take
+
+- In Kubernetes: use the Cluster Operator. It handles rolling upgrades, peer discovery, and PVC management.
+- On bare metal: use Ansible to manage configuration as code; manual `rabbitmq.conf` edits are a liability.
+- Never run RabbitMQ via `brew` in production, even on macOS servers.

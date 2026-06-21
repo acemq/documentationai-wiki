@@ -1,0 +1,101 @@
+---
+title: Perf Test
+section: 08 — Performance
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# rabbitmq-perf-test
+
+## Installation
+
+```bash
+# Download JAR
+curl -L https://github.com/rabbitmq/rabbitmq-perf-test/releases/latest/download/perf-test.jar \
+     -o perf-test.jar
+
+# Or via Docker
+docker pull pivotalrabbitmq/perf-test:latest
+```
+
+## Basic throughput test
+
+```bash
+# Single producer, single consumer, quorum queue
+java -jar perf-test.jar \
+  --uri amqp://admin:pass@rabbitmq.internal:5671 \
+  --queue-args x-queue-type=quorum \
+  --flag persistent \
+  --confirm 1 \
+  --size 1024 \
+  --producers 1 \
+  --consumers 1 \
+  --time 60
+```
+
+Key output fields:
+- `send rate`: publisher throughput (msg/s)
+- `recv rate`: consumer throughput (msg/s)
+- `confirm rate`: confirmed msg/s (the important one)
+- `latency 99th percentile`: publish-to-confirm latency
+
+## Scaling test
+
+```bash
+# Test with 4 producers, 8 consumers, 10 queues
+java -jar perf-test.jar \
+  --uri amqp://admin:pass@rabbitmq.internal:5671 \
+  --quorum-queue \
+  --flag persistent \
+  --confirm 500 \
+  --producers 4 \
+  --consumers 8 \
+  --queue-pattern 'perf-test-%d' \
+  --queue-pattern-from 1 \
+  --queue-pattern-to 10 \
+  --time 120
+```
+
+## Latency test
+
+```bash
+# Measure end-to-end latency with 1 msg/s
+java -jar perf-test.jar \
+  --uri amqp://admin:pass@rabbitmq.internal:5671 \
+  --quorum-queue \
+  --flag persistent \
+  --confirm 1 \
+  --size 1024 \
+  --producers 1 \
+  --consumers 1 \
+  --rate 100 \
+  --latency-publish-interval 1000
+```
+
+## Docker Compose test environment
+
+```yaml
+# docker-compose.perf.yml
+services:
+  perf-test:
+    image: pivotalrabbitmq/perf-test:latest
+    environment:
+      - RABBITMQ_URI=amqp://admin:pass@rabbitmq:5672
+    command: >
+      --quorum-queue
+      --flag persistent
+      --confirm 100
+      --producers 2
+      --consumers 4
+      --time 300
+    depends_on:
+      - rabbitmq
+```
+
+## AceMQ Take
+
+- Always run `perf-test` before changing production configuration. This establishes a baseline you can compare against post-change.
+- Use `--quorum-queue --flag persistent --confirm` to simulate production conditions. Without confirms, you're not measuring meaningful throughput.
+- Run perf-test from outside the broker node. Running on the same host inflates results and skews latency measurements.

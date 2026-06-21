@@ -1,0 +1,102 @@
+---
+title: Definitions Management
+section: 09 — Operations
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Definitions Management
+
+## What definitions contain
+
+The definitions file is a JSON snapshot of all broker configuration:
+- Users and their tags
+- vHosts
+- Permissions (user-vHost-resource)
+- Exchanges
+- Queues (and their arguments)
+- Bindings
+- Policies
+- Parameters (Shovel, Federation, etc.)
+
+Definitions do NOT include message data or the Erlang cookie.
+
+## Export
+
+```bash
+# Export all vHosts
+rabbitmqctl export_definitions /etc/rabbitmq/definitions.json
+
+# Via management API (more flexible, per-vHost possible)
+curl -u admin:pass \
+  https://rabbitmq:15671/api/definitions \
+  -o definitions-$(date +%Y%m%d).json
+
+# Export per-vHost
+curl -u admin:pass \
+  https://rabbitmq:15671/api/definitions/production \
+  -o definitions-production.json
+```
+
+## Import
+
+```bash
+# Import on startup (merge, not replace)
+rabbitmqctl import_definitions /etc/rabbitmq/definitions.json
+
+# Via management API (merge)
+curl -u admin:pass \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -d @definitions.json \
+  https://rabbitmq:15671/api/definitions
+```
+
+Import is a **merge** operation — existing objects are not deleted. To replace everything, reset the node first.
+
+## Auto-load on startup
+
+```ini
+# rabbitmq.conf
+management.load_definitions = /etc/rabbitmq/definitions.json
+```
+
+Useful for declarative cluster bootstrapping.
+
+## GitOps workflow
+
+```bash
+# CI/CD pipeline for definition changes
+# 1. PR: update definitions.json in git
+# 2. Review: diff shows what changed
+# 3. Merge: CI pipeline applies definitions
+
+git diff HEAD~1 -- definitions.json | \
+  python3 -c "
+import json, sys
+diff = sys.stdin.read()
+# Parse and summarize changes
+print('Changed policies:', ...)
+print('Changed queues:', ...)
+"
+
+# Apply to staging
+curl -u admin:pass \
+  -X POST -H 'Content-Type: application/json' \
+  -d @definitions.json \
+  https://staging-rabbitmq:15671/api/definitions
+
+# Apply to production after staging validation
+curl -u admin:pass \
+  -X POST -H 'Content-Type: application/json' \
+  -d @definitions.json \
+  https://rabbitmq:15671/api/definitions
+```
+
+## AceMQ Take
+
+- Keep your definitions file in version control. Every policy change, user add, and queue creation should go through a reviewed PR.
+- Use `management.load_definitions` for immutable infrastructure deployments. The broker converges to the definition state on every restart.
+- The management API import is idempotent for most objects. Bindings may be duplicated if imported multiple times — check and clean up if necessary.

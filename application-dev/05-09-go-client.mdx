@@ -1,0 +1,110 @@
+---
+title: Go Client
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Go Client (amqp091-go)
+
+## Package
+
+```bash
+go get github.com/rabbitmq/amqp091-go
+```
+
+## Connection and channel
+
+```go
+import amqp "github.com/rabbitmq/amqp091-go"
+
+conn, err := amqp.DialTLS("amqps://app-svc:pass@rabbitmq.internal:5671/production",
+    &tls.Config{ServerName: "rabbitmq.internal"})
+if err != nil {
+    log.Fatal(err)
+}
+defer conn.Close()
+
+ch, err := conn.Channel()
+if err != nil {
+    log.Fatal(err)
+}
+defer ch.Close()
+```
+
+## Publisher with confirms
+
+```go
+err = ch.Confirm(false)
+if err != nil {
+    log.Fatal(err)
+}
+
+confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
+
+err = ch.PublishWithContext(ctx,
+    "orders",       // exchange
+    "order.created", // routing key
+    true,           // mandatory
+    false,          // immediate
+    amqp.Publishing{
+        ContentType:  "application/json",
+        DeliveryMode: amqp.Persistent,
+        MessageId:    uuid.New().String(),
+        Body:         body,
+    },
+)
+if err != nil {
+    return err
+}
+
+if confirm := <-confirms; !confirm.Ack {
+    return errors.New("publish nacked")
+}
+```
+
+## Consumer with manual ack
+
+```go
+err = ch.Qos(20, 0, false) // prefetch
+msgs, err := ch.Consume("orders", "", false, false, false, false, nil)
+
+for msg := range msgs {
+    if err := process(msg.Body); err != nil {
+        msg.Nack(false, false) // dead-letter
+    } else {
+        msg.Ack(false)
+    }
+}
+```
+
+## Reconnection
+
+```go
+func connectWithRetry(url string) (*amqp.Connection, error) {
+    for attempt := 0; attempt < 10; attempt++ {
+        conn, err := amqp.DialTLS(url, tlsConfig)
+        if err == nil {
+            return conn, nil
+        }
+        time.Sleep(time.Duration(math.Pow(2, float64(attempt))) * time.Second)
+    }
+    return nil, errors.New("exhausted retries")
+}
+
+// Monitor connection close
+go func() {
+    reason, ok := <-conn.NotifyClose(make(chan *amqp.Error))
+    if !ok { return } // normal close
+    log.Printf("connection closed: %v, reconnecting...", reason)
+    // reconnect logic
+}()
+```
+
+## AceMQ Take
+
+- Use one channel per goroutine. The `amqp091-go` channel is not safe for concurrent use.
+- Monitor `conn.NotifyClose()` in a goroutine and reconnect automatically. Don't rely on the library to reconnect.
+- For very high-throughput publishing, maintain a pool of channels and rotate them, using async confirms per channel.

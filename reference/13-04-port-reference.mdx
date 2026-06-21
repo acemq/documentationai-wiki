@@ -1,0 +1,72 @@
+---
+title: Port Reference
+section: 13 — Reference
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Port Reference
+
+## All RabbitMQ ports
+
+| Port | Protocol | Purpose | Firewall rule |
+|---|---|---|---|
+| **4369** | TCP | EPMD (Erlang Port Mapper Daemon) | Cluster nodes ↔ only |
+| **5552** | TCP | RabbitMQ Stream protocol | Application → broker |
+| **5551** | TCP | RabbitMQ Stream protocol (TLS) | Application → broker |
+| **5671** | TCP | AMQP 0-9-1 / 1.0 over TLS | Application → broker |
+| **5672** | TCP | AMQP 0-9-1 / 1.0 plaintext | Application → broker (block from internet) |
+| **15672** | TCP | Management UI (HTTP) | Admin → broker (block from internet) |
+| **15671** | TCP | Management UI (HTTPS) | Admin → broker |
+| **15692** | TCP | Prometheus metrics (HTTP) | Monitoring → broker |
+| **15691** | TCP | Prometheus metrics (HTTPS) | Monitoring → broker |
+| **1883** | TCP | MQTT plaintext | IoT devices (if MQTT enabled) |
+| **8883** | TCP | MQTT over TLS | IoT devices (if MQTT enabled) |
+| **15675** | TCP | MQTT over WebSocket | Browser/IoT |
+| **61613** | TCP | STOMP plaintext | STOMP clients |
+| **61614** | TCP | STOMP over TLS | STOMP clients |
+| **15674** | TCP | STOMP over WebSocket | Browser |
+| **25672** | TCP | Erlang inter-node distribution | Cluster nodes ↔ only |
+
+## Minimum firewall rules for production
+
+```
+# Required for cluster to function:
+INTERNAL: 4369  (EPMD: between cluster nodes)
+INTERNAL: 25672 (Erlang dist: between cluster nodes)
+
+# Required for applications:
+APP → BROKER: 5671 (AMQP TLS)
+
+# Required for operations:
+OPS → BROKER: 15671 (management HTTPS)
+
+# Required for monitoring:
+MON → BROKER: 15692 (Prometheus)
+
+# Block from internet:
+5672 (plaintext AMQP)
+15672 (HTTP management)
+4369 (EPMD)
+25672 (Erlang dist)
+```
+
+## Custom port configuration
+
+```ini
+# rabbitmq.conf
+
+# Custom AMQP port
+listeners.tcp.1 = 0.0.0.0:5672
+
+# Custom TLS port
+listeners.ssl.1 = 0.0.0.0:5671
+
+# Custom management port
+management.tcp.port = 15672
+
+# Disable a port:
+# listeners.tcp = none  # disables all plaintext AMQP
+```

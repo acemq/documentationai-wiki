@@ -1,0 +1,72 @@
+---
+title: DR, RTO & RPO
+section: 11 — HA & DR
+layer: L3
+audience: [architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# DR, RTO & RPO
+
+## Definitions
+
+- **RTO (Recovery Time Objective):** Maximum tolerable time before service is restored
+- **RPO (Recovery Point Objective):** Maximum tolerable data loss, measured in time
+
+## RabbitMQ data loss model
+
+With quorum queues and publisher confirms:
+- Messages confirmed by the broker are replicated to a majority of nodes before the confirm is sent
+- A majority of nodes must be lost simultaneously to lose a confirmed message
+- Messages in-flight (published but not confirmed) may be lost on node failure
+
+## DR scenarios and recovery characteristics
+
+| Scenario | Data loss | Recovery time |
+|---|---|---|
+| Single node failure (3-node cluster) | None | Automatic (seconds) |
+| 2 nodes fail simultaneously (3-node) | Possible (no quorum) | Minutes (restore quorum) |
+| Entire cluster failure | In-flight messages | Minutes to hours |
+| Datacenter failure (multi-DC cluster) | None (if quorum maintained) | Automatic |
+| Datacenter failure (single-DC cluster) | All in-flight messages | Hours (restore from backup) |
+
+## RTO targets by deployment type
+
+| Deployment | RTO | How achieved |
+|---|---|---|
+| 3-node multi-AZ | < 30 seconds | Automatic quorum failover |
+| 5-node multi-AZ | < 10 seconds | Faster Raft convergence |
+| Cross-region with Shovel | 5–30 minutes | Manual or automated failover |
+| Single cluster from backup | 1–4 hours | Restore + redeploy |
+
+## RPO targets
+
+| Scenario | RPO |
+|---|---|
+| Quorum queue, confirms enabled | ~0 (confirmed messages safe) |
+| Quorum queue, no confirms | Last successful confirm |
+| Single-node crash | Messages in RAM not flushed to disk |
+| Definitions backup (daily) | Up to 24 hours of config changes |
+
+## DR runbook template
+
+```
+# Cluster total failure
+
+1. Alert oncall (< 2 min)
+2. Assess: which nodes are down, is quorum available? (< 5 min)
+3. If quorum available: nodes will auto-recover. Monitor. (< 30 min)
+4. If quorum lost:
+   a. Restore nodes from snapshot or rebuild
+   b. If no snapshot: restore definitions from backup
+   c. Start cluster, verify
+   d. Accept: messages since last snapshot are lost
+5. Notify stakeholders of status and impact
+```
+
+## AceMQ Take
+
+- RTO of < 30 seconds is achievable with a 3-node multi-AZ quorum queue cluster. Beyond that, DR requires either larger cluster or cross-region architecture.
+- Publisher confirms are your RPO guarantee. Without confirms, RPO depends on when messages happen to be synced to disk and replicated.
+- Most teams underestimate the time to rebuild definitions from scratch. Automate definitions backup and verify restore time in a DR drill.

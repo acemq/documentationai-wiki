@@ -1,0 +1,128 @@
+---
+title: Configuration Reference
+section: 13 — Reference
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Configuration Reference
+
+## rabbitmq.conf key reference
+
+### Listeners
+
+```ini
+# AMQP plaintext
+listeners.tcp.default = 5672
+# listeners.tcp = none  # to disable
+
+# AMQP TLS
+listeners.ssl.default = 5671
+ssl_options.certfile   = /etc/rabbitmq/certs/server.crt
+ssl_options.keyfile    = /etc/rabbitmq/certs/server.key
+ssl_options.cacertfile = /etc/rabbitmq/certs/ca.crt
+ssl_options.verify     = verify_peer
+ssl_options.fail_if_no_peer_cert = true
+ssl_options.versions.1 = tlsv1.3
+ssl_options.versions.2 = tlsv1.2
+
+# Management HTTP
+management.tcp.port = 15672
+# Management HTTPS
+management.ssl.port = 15671
+```
+
+### Memory
+
+```ini
+# Relative (DO NOT use in containers)
+vm_memory_high_watermark.relative = 0.4
+
+# Absolute (use in containers)
+vm_memory_high_watermark.absolute = 4GB
+
+# Paging ratio (message paging starts at this fraction of watermark)
+vm_memory_high_watermark_paging_ratio = 0.75
+```
+
+### Disk
+
+```ini
+# Minimum disk free space before disk alarm
+disk_free_limit.relative = 1.5  # 150% of RAM
+# or:
+disk_free_limit.absolute = 10GB
+```
+
+### Heartbeat
+
+```ini
+heartbeat = 60  # seconds; 0 = disabled
+```
+
+### Queue defaults
+
+```ini
+# Default queue type for declarations without x-queue-type
+default_queue_type = quorum  # or classic
+
+# Default vHost
+default_vhost = /
+
+# Default user
+default_user = guest
+default_pass = guest
+
+# Default user permissions
+default_permissions.configure = .*
+default_permissions.read = .*
+default_permissions.write = .*
+```
+
+### TCP tuning
+
+```ini
+tcp_listen_options.backlog = 4096
+tcp_listen_options.sndbuf  = 196608
+tcp_listen_options.recbuf  = 196608
+tcp_listen_options.nodelay = true
+tcp_listen_options.keepalive = true
+```
+
+### Raft / WAL (advanced)
+
+```ini
+# WAL file size before rotation
+ra.wal_max_size_bytes = 134217728  # 128 MB
+
+# WAL write batch size
+ra.wal_max_batch_size = 4096
+```
+
+### Logging
+
+```ini
+log.console = true
+log.console.level = warning
+
+log.file = /var/log/rabbitmq/rabbit.log
+log.file.level = info
+log.file.rotation.size = 104857600  # 100 MB
+log.file.rotation.count = 5
+
+# Category overrides
+log.connection.level = info
+log.channel.level = warning
+```
+
+### Cluster formation
+
+```ini
+# Kubernetes peer discovery
+cluster_formation.peer_discovery_backend = rabbit_peer_discovery_k8s
+cluster_formation.k8s.host = kubernetes.default.svc.cluster.local
+cluster_formation.k8s.address_type = hostname
+cluster_formation.node_cleanup.only_log_warning = true
+```

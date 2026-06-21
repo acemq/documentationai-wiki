@@ -1,0 +1,102 @@
+---
+title: Log Aggregation
+section: 07 — Monitoring
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Log Aggregation
+
+## Log categories
+
+RabbitMQ produces logs in several categories:
+
+| Category | Log level | Key events |
+|---|---|---|
+| `connection` | info | Open/close, auth failures |
+| `channel` | warning | Protocol errors (404, 406) |
+| `queue` | info | Declaration, deletion, overflow |
+| `mnesia` / `khepri` | warning | Metadata store issues |
+| `ra` | warning | Raft consensus events |
+| `upgrade` | info | Version upgrade progress |
+
+## Configuring log levels
+
+```ini
+# rabbitmq.conf
+log.console = true
+log.console.level = warning  # only warn/error to console
+
+log.file = /var/log/rabbitmq/rabbit.log
+log.file.level = info  # info+ to file
+log.file.rotation.size = 104857600  # 100 MB
+log.file.rotation.count = 5
+
+# Category overrides
+log.connection.level = info
+log.channel.level = warning
+log.upgrade.level = info
+```
+
+## Forwarding to Loki (Grafana stack)
+
+```yaml
+# promtail config
+scrape_configs:
+  - job_name: rabbitmq
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: rabbitmq
+          __path__: /var/log/rabbitmq/rabbit.log
+    pipeline_stages:
+      - regex:
+          expression: '(?P<level>(warning|error|critical))'
+      - labels:
+          level:
+```
+
+## Forwarding to Elasticsearch (ELK)
+
+```yaml
+# filebeat.yml
+filebeat.inputs:
+- type: log
+  paths:
+    - /var/log/rabbitmq/rabbit.log
+  fields:
+    service: rabbitmq
+    node: "${HOSTNAME}"
+
+output.elasticsearch:
+  hosts: ["elasticsearch:9200"]
+  index: "rabbitmq-logs-%{+yyyy.MM.dd}"
+```
+
+## High-value log patterns
+
+```
+# Authentication failure
+pattern: "access refused"
+alert: if rate > 5/min
+
+# Memory alarm
+pattern: "memory alarm set"
+alert: immediate
+
+# Node down / partition
+pattern: "rabbit@.* is down"
+alert: immediate (P1)
+
+# Channel error
+pattern: "operation queue.declare caused a channel exception"
+alert: if rate > 10/min
+```
+
+## AceMQ Take
+
+- Ship logs at `info` level to your aggregation platform. `warning` misses connection events that are valuable for security analysis.
+- Configure log rotation. Unbounded log files on a busy broker will fill the disk alarm threshold.
+- Index log levels as structured fields, not just free-text. This enables fast alert queries.

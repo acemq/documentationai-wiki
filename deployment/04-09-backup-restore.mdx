@@ -1,0 +1,72 @@
+---
+title: Backup & Restore
+section: 04 — Deployment
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Backup & Restore
+
+## What to back up
+
+| Component | Location | Criticality |
+|---|---|---|
+| Definitions (topology) | `/api/definitions` | Critical |
+| Erlang cookie | `/var/lib/rabbitmq/.erlang.cookie` | Critical |
+| rabbitmq.conf | `/etc/rabbitmq/rabbitmq.conf` | High |
+| enabled_plugins | `/etc/rabbitmq/enabled_plugins` | High |
+| Message data | `/var/lib/rabbitmq/mnesia/` | Depends on queue durability |
+
+## Definitions backup (recommended primary backup)
+
+```bash
+# Export all definitions
+curl -u admin:"$ADMIN_PASS" \
+  https://rabbitmq.internal:15671/api/definitions \
+  -o definitions-$(date +%Y%m%d).json
+
+# Restore definitions
+curl -u admin:"$ADMIN_PASS" \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -d @definitions-20260601.json \
+  https://rabbitmq.internal:15671/api/definitions
+```
+
+The definitions backup captures: users, vHosts, permissions, exchanges, queues, bindings, policies, parameters. It does **not** capture messages in queues.
+
+## Message data backup
+
+For quorum queues, messages are replicated across Raft members. A full node failure is handled by Raft replica recovery, not backup restore.
+
+For point-in-time message backup:
+```bash
+# Stop the node (ensures a clean copy)
+rabbitmqctl stop_app
+
+# Copy the data directory
+rsync -avz /var/lib/rabbitmq/mnesia/ backup-host:/backups/rabbitmq/$(date +%Y%m%d)/
+
+# Restart
+rabbitmqctl start_app
+```
+
+**Note:** This requires a maintenance window. Never copy message data while the node is running.
+
+## Restore procedure
+
+1. Install a fresh RabbitMQ node with the same version
+2. Restore the Erlang cookie
+3. Restore `rabbitmq.conf` and `enabled_plugins`
+4. Start the node
+5. Import definitions via the management API
+
+See [DR Runbooks](/ha-dr/11-07-dr-runbooks) for full step-by-step procedures.
+
+## AceMQ Take
+
+- Back up definitions daily via cron. Store in S3/GCS with 30-day retention.
+- The definitions backup is your most important recovery artifact. Message data in quorum queues recovers via Raft replication when a node rejoins.
+- Test your restore procedure quarterly. An untested backup is not a backup.

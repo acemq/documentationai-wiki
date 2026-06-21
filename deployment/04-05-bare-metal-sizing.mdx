@@ -1,0 +1,75 @@
+---
+title: Bare Metal Sizing
+section: 04 — Deployment
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Bare Metal Sizing
+
+## Sizing principles
+
+RabbitMQ performance is bounded by three resources in order of impact:
+
+1. **Disk I/O** — WAL fdatasync latency directly limits publisher confirm throughput
+2. **RAM** — message buffers, queue indexes, connection state
+3. **CPU** — Erlang schedulers, TLS, protocol processing
+
+## Reference configurations
+
+### Small (< 10k msg/s, 3-node cluster)
+
+| Resource | Spec |
+|---|---|
+| CPU | 8 cores (Intel/AMD, 3+ GHz) |
+| RAM | 16 GB |
+| Disk (OS) | 50 GB SSD |
+| Disk (RabbitMQ data + WAL) | 200 GB NVMe SSD |
+| Network | 1 Gbps |
+
+### Medium (10–100k msg/s, 3-node cluster)
+
+| Resource | Spec |
+|---|---|
+| CPU | 16 cores |
+| RAM | 32–64 GB |
+| Disk (data + WAL) | 500 GB NVMe, separate spindles for WAL |
+| Network | 10 Gbps |
+
+### Large (> 100k msg/s, 5-node cluster)
+
+| Resource | Spec |
+|---|---|
+| CPU | 32 cores per node |
+| RAM | 128 GB per node |
+| Disk (data) | 1 TB NVMe |
+| Disk (WAL) | Dedicated NVMe, 100K+ IOPS |
+| Network | 25–40 Gbps |
+
+## Disk layout
+
+```
+/          — OS (SSD, 50 GB)
+/var/lib/rabbitmq  — data (NVMe, large)
+/var/lib/rabbitmq/mnesia/<node>/quorum  — WAL (fastest NVMe available)
+```
+
+Separate the WAL from queue message data if possible. The WAL is write-heavy and sequential; queue data is mixed read/write.
+
+## Memory watermark
+
+```ini
+# rabbitmq.conf
+# On bare metal: relative mode is correct
+vm_memory_high_watermark.relative = 0.4  # 40% of system RAM
+```
+
+With 32 GB RAM, the watermark triggers at ~12.8 GB. This leaves headroom for the OS, Erlang VM, and ETS tables.
+
+## AceMQ Take
+
+- Disk I/O is the #1 bottleneck. Invest in NVMe before adding CPU or RAM.
+- Validate WAL performance before production: run `fio --name=waltest --filename=/var/lib/rabbitmq/wal/test --ioengine=sync --rw=write --bs=4k --size=1G --fdatasync=1 --runtime=30` and check p99 latency.
+- Separate the WAL directory onto its own NVMe if WAL fdatasync p99 > 5ms under load.

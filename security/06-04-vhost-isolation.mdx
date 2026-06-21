@@ -1,0 +1,69 @@
+---
+title: vHost Isolation
+section: 06 — Security
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# vHost Isolation
+
+## Isolation properties
+
+A virtual host provides:
+- **Resource namespace isolation:** Exchanges, queues, bindings in vHost A are invisible to vHost B
+- **Permission isolation:** Users have per-vHost permissions
+- **Policy isolation:** Policies are scoped to a vHost
+
+A single message cannot cross vHost boundaries directly. Cross-vHost routing requires a Shovel or Federation link.
+
+## Recommended vHost topology
+
+| Approach | When to use |
+|---|---|
+| One vHost per team / service | Multi-tenant broker, billing isolation, security boundary |
+| One vHost per environment | Dev/staging/prod on same broker (small deployments) |
+| One vHost per workload type | Separate transactional from analytics traffic |
+
+## Creating and configuring vHosts
+
+```bash
+# Create
+rabbitmqctl add_vhost payments
+
+# Set metadata (description and tags)
+rabbitmqctl set_vhost_metadata payments \
+  '{"description": "Payments team messaging", "tags": "payments,production"}'
+
+# Grant application access
+rabbitmqctl set_permissions -p payments app-svc "" "^payments\." "^payments\."
+
+# Grant admin access (full)
+rabbitmqctl set_permissions -p payments rabbit-admin ".*" ".*" ".*"
+```
+
+## Per-vHost resource limits
+
+```bash
+# Limit connections per vHost
+rabbitmqctl set_vhost_limits payments \
+  '[{"max-connections": 100}, {"max-queues": 500}]'
+```
+
+## Audit: list all vHost permissions
+
+```bash
+# Who has access to which vHosts
+rabbitmqctl list_vhosts
+for vhost in $(rabbitmqctl list_vhosts -q); do
+  echo "=== $vhost ==="
+  rabbitmqctl list_permissions -p "$vhost" --formatter pretty_table
+done
+```
+
+## AceMQ Take
+
+- Never use the default `/` vHost for production application traffic. Create named vHosts per team or service.
+- vHost limits (`max-connections`, `max-queues`) prevent a single team from accidentally degrading cluster resources.
+- Cross-vHost routing via Shovel should be explicit and documented. Undocumented Shovels are a security and operational risk.

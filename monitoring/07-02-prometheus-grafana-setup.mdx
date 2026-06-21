@@ -1,0 +1,78 @@
+---
+title: Prometheus & Grafana Setup
+section: 07 — Monitoring
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Prometheus & Grafana Setup
+
+## Enable the Prometheus plugin
+
+```bash
+rabbitmq-plugins enable rabbitmq_prometheus
+```
+
+Metrics are exposed at `http://<node>:15692/metrics` (per-object) and `http://<node>:15692/metrics/per-object` for detailed per-queue metrics.
+
+## Prometheus scrape configuration
+
+```yaml
+# prometheus.yml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: rabbitmq_per_node
+    static_configs:
+      - targets:
+          - rabbit@node1:15692
+          - rabbit@node2:15692
+          - rabbit@node3:15692
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: rabbitmq_per_object
+    static_configs:
+      - targets:
+          - node1:15692
+    metrics_path: /metrics/per-object
+    scrape_interval: 60s  # expensive; scrape less frequently
+```
+
+## Grafana dashboard import
+
+RabbitMQ provides official Grafana dashboards:
+
+| Dashboard | Grafana ID |
+|---|---|
+| RabbitMQ Overview | 10991 |
+| Erlang-Distribution | 11352 |
+| Quorum Queues | 11340 |
+
+```bash
+# Import via Grafana API
+curl -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"dashboard":{"id":10991}, "overwrite":true}' \
+  https://grafana.internal/api/dashboards/import
+```
+
+## Key Grafana panels to add
+
+- Queue depth per queue (ready + unacked)
+- Consumer utilisation per queue
+- Node memory usage vs. watermark
+- WAL write latency (p50/p99)
+- Raft term changes per minute
+- Connection count per node
+
+## AceMQ Take
+
+- Scrape `per-object` metrics at 60s intervals, not 15s. Per-queue metrics are expensive on large clusters (hundreds of queues).
+- Import the official Grafana dashboards as a starting point, then customize for your queue naming conventions and SLOs.
+- Pin the Grafana dashboard to your oncall runbook. When the phone rings, the dashboard should be one click away.

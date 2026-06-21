@@ -1,0 +1,79 @@
+---
+title: Monitoring Strategy
+section: 07 — Monitoring
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Monitoring Strategy
+
+## Signal hierarchy
+
+Monitor RabbitMQ across four signal types:
+
+| Signal | Tool | Primary use |
+|---|---|---|
+| **Metrics** | Prometheus + Grafana | Trends, capacity, alerting |
+| **Logs** | ELK / Loki / Splunk | Root cause, audit trail |
+| **Traces** | OpenTelemetry | Request path latency |
+| **Health checks** | `rabbitmq-diagnostics` | Liveness, readiness |
+
+## The 5 metrics that matter most
+
+| Metric | Alert threshold | What it indicates |
+|---|---|---|
+| `rabbitmq_queue_messages_ready` | > SLA * 2 | Consumer lag, processing failure |
+| `rabbitmq_process_resident_memory_bytes` | > 70% of watermark | Memory pressure approaching flow control |
+| `rabbitmq_disk_space_available_bytes` | < `disk_free_limit` | Disk alarm imminent |
+| `rabbitmq_ra_log_wal_write_duration_seconds` p99 | > 10ms | Raft performance degradation |
+| `rabbitmq_connections` | > 80% of `connection_max` | Connection saturation |
+
+## Prometheus plugin
+
+```bash
+rabbitmq-plugins enable rabbitmq_prometheus
+```
+
+```yaml
+# prometheus.yml scrape config
+scrape_configs:
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ['node1:15692', 'node2:15692', 'node3:15692']
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+```
+
+## Health check endpoints
+
+```bash
+# Liveness: is the node running?
+rabbitmq-diagnostics ping
+
+# Readiness: is the node ready to serve traffic?
+rabbitmq-diagnostics check_local_alarms
+
+# Deep health: full status
+rabbitmq-diagnostics status
+```
+
+Kubernetes probes:
+```yaml
+livenessProbe:
+  exec:
+    command: ['rabbitmq-diagnostics', '-q', 'ping']
+  periodSeconds: 30
+readinessProbe:
+  exec:
+    command: ['rabbitmq-diagnostics', '-q', 'check_local_alarms']
+  periodSeconds: 15
+```
+
+## AceMQ Take
+
+- Alert on queue depth trends, not just current depth. A queue that doubles every 30 minutes is more urgent than one that's statically deep.
+- Separate liveness from readiness probes. A node can be alive (process up) but not ready (memory alarm active, no consumer capacity).
+- Enable `rabbitmq_prometheus` on every node. Scrape all nodes, not just one — quorum queue leaders move between nodes.

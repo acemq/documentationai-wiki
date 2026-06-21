@@ -1,0 +1,77 @@
+---
+title: SLA Runbook
+section: 11 — HA & DR
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# SLA Runbook
+
+## SLA tiers
+
+| Tier | Availability target | Max downtime/month | RTO | Response |
+|---|---|---|---|---|
+| Tier 1 (critical) | 99.99% | 4.4 minutes | < 5 min | PagerDuty, immediate |
+| Tier 2 (standard) | 99.9% | 44 minutes | < 30 min | PagerDuty, 24/7 |
+| Tier 3 (best effort) | 99.5% | 3.6 hours | < 2 hours | Email, business hours |
+
+## Incident response procedure
+
+### P1: RabbitMQ cluster fully down
+
+1. **T+0:** Alert fires → Oncall acknowledges
+2. **T+2:** Assess cluster state (`rabbitmqctl cluster_status`)
+3. **T+5:** Identify cause (node failure, resource alarm, network)
+4. **T+10:** Begin recovery procedure per [DR Runbook](/ha-dr/11-04-disaster-recovery-runbook)
+5. **T+15:** Stakeholder notification (if SLA breach is likely)
+6. **T+RTO:** Service restored; verify with smoke tests
+7. **T+24h:** Postmortem scheduled
+
+### P2: Consumer lag SLO breach
+
+1. **T+0:** Alert fires for queue depth > threshold
+2. **T+5:** Check consumer count and utilization
+3. **T+10:** Scale consumers if utilization > 0.9; investigate if not
+4. **T+30:** If not resolved, escalate to P1
+
+### P3: Performance degradation (WAL latency > 10ms)
+
+1. **T+0:** Alert fires; assess impact on confirm latency
+2. **T+30:** Check disk I/O; free disk space; check for competing I/O
+3. **T+60:** If disk hardware issue, schedule node maintenance
+4. **T+4h:** Escalate to P2 if confirm latency affects SLA
+
+## Smoke test suite
+
+Run after every incident recovery:
+
+```bash
+#!/bin/bash
+# rabbitmq-smoke-test.sh
+
+set -e
+
+# Test 1: Cluster health
+rabbitmqctl cluster_status | grep "running_nodes" | grep -q node1
+rabbitmqctl cluster_status | grep "running_nodes" | grep -q node2
+rabbitmqctl cluster_status | grep "running_nodes" | grep -q node3
+echo "PASS: All nodes running"
+
+# Test 2: No alarms
+ALARMS=$(rabbitmqctl list_alarms | wc -l)
+[ "$ALARMS" -eq 0 ] && echo "PASS: No alarms" || echo "FAIL: Alarms active"
+
+# Test 3: Publish and consume a test message
+java -jar perf-test.jar --uri amqp://admin:pass@localhost:5672 \
+  --quorum-queue --confirm 1 --producers 1 --consumers 1 \
+  --pmessages 100 --time 30
+echo "PASS: Publish and consume verified"
+```
+
+## AceMQ Take
+
+- Define SLA tiers per queue or queue group, not per cluster. A single cluster can host both Tier 1 (payments) and Tier 3 (analytics) queues.
+- Automate the smoke test suite. Oncall engineers under pressure will skip manual steps; automated verification doesn't.
+- Schedule a 30-minute DR drill quarterly. Run through the P1 scenario in staging with the real runbook. Update the runbook with anything that didn't work.

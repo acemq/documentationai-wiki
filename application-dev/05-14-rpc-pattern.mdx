@@ -1,0 +1,106 @@
+---
+title: RPC Pattern
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# RPC Pattern
+
+## How AMQP RPC works
+
+```
+Client                          Server
+  │                               │
+  ├─ Declare reply queue (auto-delete, exclusive)
+  ├─ Publish to rpc.request ──────→
+  │  (reply_to=reply.abc123)      ├─ Process
+  │  (correlation_id=req-1)       ├─ Publish to reply.abc123
+  │                    ─────────←│  (correlation_id=req-1)
+  ├─ Match correlation_id
+  └─ Return response
+```
+
+## Client implementation
+
+```python
+import uuid
+import pika
+
+class RpcClient:
+    def __init__(self, channel):
+        self.channel = channel
+        self.responses = {}
+
+        # Exclusive reply queue
+        result = channel.queue_declare(queue='', exclusive=True)
+        self.callback_queue = result.method.queue
+
+        channel.basic_consume(
+            queue=self.callback_queue,
+            on_message_callback=self._on_response,
+            auto_ack=True
+        )
+
+    def _on_response(self, ch, method, props, body):
+        self.responses[props.correlation_id] = body
+
+    def call(self, payload, timeout=5.0):
+        corr_id = str(uuid.uuid4())
+        self.channel.basic_publish(
+            exchange='',
+            routing_key='rpc.requests',
+            properties=pika.BasicProperties(
+                reply_to=self.callback_queue,
+                correlation_id=corr_id,
+                expiration=str(int(timeout * 1000)),
+                delivery_mode=1  # non-persistent: RPC is ephemeral
+            ),
+            body=json.dumps(payload).encode()
+        )
+
+        deadline = time.time() + timeout
+        while corr_id not in self.responses and time.time() < deadline:
+            self.channel.connection.process_data_events(time_limit=0.1)
+
+        return self.responses.pop(corr_id, None)
+```
+
+## Server implementation
+
+```python
+def on_request(ch, method, props, body):
+    request = json.loads(body)
+    response = process(request)
+
+    ch.basic_publish(
+        exchange='',
+        routing_key=props.reply_to,
+        properties=pika.BasicProperties(correlation_id=props.correlation_id),
+        body=json.dumps(response).encode()
+    )
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+
+channel.basic_qos(prefetch_count=10)
+channel.basic_consume(queue='rpc.requests', on_message_callback=on_request)
+```
+
+## Reply queue cleanup
+
+Use `expiration` on RPC request messages to handle client timeouts. Also set TTL on the reply queue:
+
+```python
+channel.queue_declare(
+    queue='',
+    exclusive=True,
+    arguments={'x-expires': 60000}  # auto-delete after 60s inactivity
+)
+```
+
+## AceMQ Take
+
+- Use non-persistent messages (`delivery_mode=1`) for RPC — there's no value in persisting ephemeral request/response messages.
+- Set `expiration` on requests to prevent orphaned messages piling up on the server queue if clients time out.
+- For high-concurrency RPC (> 100 concurrent requests), consider multiplexing responses via a shared reply queue with correlation ID routing rather than one exclusive queue per request.

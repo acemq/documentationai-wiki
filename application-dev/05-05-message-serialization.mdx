@@ -1,0 +1,94 @@
+---
+title: Message Serialization
+section: 05 — Application Dev
+layer: L3
+audience: [developer, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Message Serialization
+
+## Format options
+
+| Format | Size | Schema | Best for |
+|---|---|---|---|
+| **JSON** | Large | Schema Registry or docs | Simple, human-readable |
+| **Protocol Buffers** | Small | `.proto` files | High-throughput, cross-language |
+| **Avro** | Small | Schema Registry | Evolving schemas, data pipelines |
+| **MessagePack** | Medium | Code | JSON-compatible binary |
+| **Thrift** | Small | `.thrift` files | Cross-language services |
+
+## Content-type header
+
+Always set the `content_type` AMQP property:
+
+```python
+import json
+import pika
+
+props = pika.BasicProperties(
+    content_type="application/json",
+    delivery_mode=2  # persistent
+)
+
+channel.basic_publish(
+    exchange="events",
+    routing_key="order.created",
+    body=json.dumps(event).encode("utf-8"),
+    properties=props
+)
+```
+
+## Protobuf example
+
+```python
+from orders_pb2 import OrderCreated
+
+order = OrderCreated(order_id="abc-123", amount=9900)
+
+props = pika.BasicProperties(
+    content_type="application/protobuf",
+    delivery_mode=2
+)
+
+channel.basic_publish(
+    exchange="events",
+    routing_key="order.created",
+    body=order.SerializeToString(),
+    properties=props
+)
+```
+
+## Schema evolution rules
+
+| Change | Safe? |
+|---|---|
+| Add optional field | Yes |
+| Remove optional field | Yes (consumers should ignore unknown fields) |
+| Rename field | **No** (breaks deserialization) |
+| Change field type | **No** |
+| Add required field | **No** (breaks old producers) |
+
+## Message envelope pattern
+
+For complex systems, wrap the payload in an envelope:
+
+```json
+{
+  "schema_version": "1.2",
+  "event_type": "order.created",
+  "message_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2026-06-01T12:00:00Z",
+  "payload": {
+    "order_id": "abc-123",
+    "amount": 9900
+  }
+}
+```
+
+## AceMQ Take
+
+- Set `content_type` on every message. Consumers should reject messages with unexpected content types rather than trying to guess.
+- Use `message_id` for idempotency tracking. Generate a UUID per logical event, not per publish attempt.
+- Protobuf or Avro are strongly preferred over JSON for high-throughput (> 10k msg/s) scenarios. JSON serialization CPU cost becomes significant at scale.

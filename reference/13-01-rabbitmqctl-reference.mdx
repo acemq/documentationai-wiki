@@ -1,0 +1,132 @@
+---
+title: rabbitmqctl Reference
+section: 13 — Reference
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# rabbitmqctl Reference
+
+## Cluster management
+
+```bash
+# Cluster status
+rabbitmqctl cluster_status
+
+# Join a cluster
+rabbitmqctl join_cluster rabbit@other-node
+
+# Remove a node from cluster
+rabbitmqctl forget_cluster_node rabbit@dead-node
+
+# Check if node is quorum-critical (run before stopping)
+rabbitmq-diagnostics check_if_node_is_quorum_critical
+
+# Check cluster connectivity
+rabbitmqctl eval 'net_adm:ping(rabbit@node2).'
+```
+
+## Queue management
+
+```bash
+# List queues
+rabbitmqctl list_queues name messages consumers state type
+rabbitmqctl list_queues --vhost production --formatter pretty_table
+
+# Purge queue
+rabbitmqctl purge_queue --vhost production orders
+
+# Delete queue
+rabbitmqctl delete_queue --vhost production orders
+
+# Rebalance quorum queue leaders
+rabbitmq-queues rebalance quorum
+rabbitmq-queues rebalance quorum --vhost production
+
+# Quorum status of a queue
+rabbitmq-queues quorum_status production orders
+```
+
+## User management
+
+```bash
+# List users
+rabbitmqctl list_users
+
+# Add user
+rabbitmqctl add_user username password
+
+# Set tags
+rabbitmqctl set_user_tags username monitoring
+
+# Delete user
+rabbitmqctl delete_user username
+
+# Authenticate
+rabbitmqctl authenticate_user username password
+```
+
+## Permission management
+
+```bash
+# Set permissions
+rabbitmqctl set_permissions -p vhost user configure_pattern write_pattern read_pattern
+
+# Clear permissions
+rabbitmqctl clear_permissions -p vhost user
+
+# List permissions on a vHost
+rabbitmqctl list_permissions -p production
+
+# List all permissions for a user
+rabbitmqctl list_user_permissions username
+```
+
+## Policy management
+
+```bash
+# Set policy
+rabbitmqctl set_policy name pattern definition --apply-to queues --priority 50
+
+# List policies
+rabbitmqctl list_policies
+rabbitmqctl list_policies -p production
+
+# Clear policy
+rabbitmqctl clear_policy -p production policy-name
+
+# Operator policy
+rabbitmqctl set_operator_policy name pattern definition --apply-to queues
+```
+
+## Diagnostics
+
+```bash
+# Node health
+rabbitmq-diagnostics ping
+rabbitmq-diagnostics status
+rabbitmq-diagnostics node_health_check
+rabbitmq-diagnostics check_local_alarms
+
+# Memory breakdown
+rabbitmq-diagnostics memory_breakdown
+
+# Network listeners
+rabbitmq-diagnostics listeners
+
+# Erlang runtime
+rabbitmq-diagnostics erlang_version
+rabbitmq-diagnostics runtime_parameters
+```
+
+## Import/export
+
+```bash
+# Export definitions
+rabbitmqctl export_definitions /path/to/definitions.json
+
+# Import definitions
+rabbitmqctl import_definitions /path/to/definitions.json
+```

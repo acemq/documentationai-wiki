@@ -1,0 +1,67 @@
+---
+title: Security Checklist
+section: 06 — Security
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Security Checklist
+
+## Pre-production gate
+
+Every RabbitMQ deployment must pass all items in this checklist before receiving production traffic.
+
+### Authentication & Authorization
+
+- [ ] Default `guest` user disabled or password changed
+- [ ] No users with `administrator` tag except break-glass accounts
+- [ ] Service accounts use least-privilege permissions (no `.*` configure unless required)
+- [ ] All passwords stored in secrets manager (not config files)
+- [ ] Erlang cookie is a random 32+ character string stored in secrets manager
+
+### Network
+
+- [ ] Management UI (15672) is behind authentication proxy or disabled externally
+- [ ] AMQP plaintext port (5672) disabled or firewalled from internet
+- [ ] TLS enabled on AMQP listener (5671)
+- [ ] TLS enabled on management API (15671)
+- [ ] Inter-node communication (25672) restricted to cluster nodes only
+- [ ] EPMD port (4369) restricted to cluster nodes and ops hosts
+
+### TLS
+
+- [ ] TLS 1.2 minimum; TLS 1.3 preferred
+- [ ] Certificate from internal CA or trusted CA
+- [ ] `verify_peer` enabled (mutual TLS for internal services)
+- [ ] Certificate expiry alert set (> 30 days notice)
+
+### Logging & Audit
+
+- [ ] Audit logging enabled (`rabbitmq_audit_log` plugin or syslog)
+- [ ] Logs shipped to centralized log store (SIEM)
+- [ ] Log retention ≥ 90 days
+
+### Queue security
+
+- [ ] vHosts created per application boundary (not using `/` for everything)
+- [ ] Publisher and consumer accounts have separate permissions
+- [ ] `delivery-limit` set on all quorum queues
+
+## Verify commands
+
+```bash
+# List all users and tags
+rabbitmqctl list_users
+
+# Check if guest exists with default password
+rabbitmqctl authenticate_user guest guest
+# Should fail: "Error: failed to authenticate user 'guest'"
+
+# List all permissions
+rabbitmqctl list_permissions -p /
+
+# Check TLS listeners
+rabbitmq-diagnostics listeners
+```

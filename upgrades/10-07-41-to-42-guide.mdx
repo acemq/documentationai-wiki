@@ -1,0 +1,57 @@
+---
+title: 4.1 → 4.2 Upgrade Guide
+section: 10 — Upgrades
+layer: L3
+audience: [sre]
+rabbitmq_versions: "4.1 – 4.2"
+last_reviewed: 2026-06
+---
+
+# 4.1 → 4.2 Upgrade Guide
+
+## Notable changes in 4.2
+
+| Change | Impact | Action |
+|---|---|---|
+| Quorum queue memory improvements | Reduced memory usage at scale | No action; benefit is automatic |
+| Enhanced AMQP 1.0 consumer features | Better protocol compliance | No breaking changes |
+| Improved Raft log compaction | Less WAL disk usage | No action |
+| CLI command additions | New management capabilities | Update automation |
+
+## 4.1 → 4.2 is a low-risk upgrade
+
+No breaking changes. No migration steps beyond the standard rolling upgrade procedure.
+
+## Standard procedure
+
+Follow the [Rolling Upgrade Procedure](/upgrades/10-03-rolling-upgrade-procedure):
+
+1. Export definitions
+2. Upgrade one node at a time
+3. Verify after each node
+4. Rebalance quorum leaders after all nodes upgraded
+5. Enable new feature flags
+
+## Post-upgrade verification
+
+```bash
+# Version
+rabbitmqctl version  # should show 4.2.x
+
+# Health
+rabbitmq-diagnostics cluster_status
+rabbitmq-diagnostics check_local_alarms
+
+# Quorum queues
+rabbitmq-queues check_quorum_status
+rabbitmq-queues rebalance quorum
+
+# Feature flags
+rabbitmqctl list_feature_flags | grep disabled
+# Consider enabling any newly available stable flags
+```
+
+## AceMQ Take
+
+- The 4.1 → 4.2 upgrade is the lowest-risk step in the current upgrade sequence. Plan a normal maintenance window but don't expect surprises.
+- After any upgrade, run your full application integration test suite against the upgraded cluster before marking the window closed.

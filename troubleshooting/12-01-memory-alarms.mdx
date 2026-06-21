@@ -1,0 +1,77 @@
+---
+title: Memory Alarms
+section: 12 — Troubleshooting
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Memory Alarms
+
+## Symptoms
+
+- Publishers are blocked (`rabbitmqctl list_connections name state` shows `blocked`)
+- Management UI shows a red memory alarm banner
+- `rabbitmq_alarms_memory_used_watermark` metric = 1
+- Application logs show connection timeouts or `AMQP connection blocked` errors
+
+## Immediate diagnosis
+
+```bash
+# Check active alarms
+rabbitmqctl list_alarms
+
+# Memory breakdown
+rabbitmq-diagnostics memory_breakdown
+
+# Current memory usage vs. watermark
+rabbitmqctl eval '
+  Used = rabbit_vm_memory_monitor:get_memory_use(absolute),
+  {ok, Limit} = application:get_env(rabbit, vm_memory_high_watermark),
+  io:format("Used: ~p~n Watermark: ~p~n", [Used, Limit]).'
+```
+
+## Common causes
+
+| Cause | Indicator | Fix |
+|---|---|---|
+| Consumer lag (messages piling up) | Queue depth growing | Scale consumers |
+| Too many connections | High connection count in breakdown | Connection pooling |
+| Message body size (large messages) | High "Binaries" in breakdown | Reduce message size / claim-check |
+| Container watermark misconfigured | Watermark > container RAM | Use `absolute` watermark |
+
+## Emergency relief
+
+```bash
+# Temporarily increase watermark (buy time)
+rabbitmqctl set_vm_memory_high_watermark 0.6
+
+# Force paging to disk sooner
+rabbitmqctl set_vm_memory_high_watermark_paging_ratio 0.5
+
+# Purge a queue if it's safe to lose messages
+rabbitmqctl purge_queue --vhost production high-volume-queue
+```
+
+## Container-specific fix
+
+If memory alarm fires when container memory is fine (container trap):
+
+```ini
+# rabbitmq.conf
+# Replace relative watermark with absolute
+vm_memory_high_watermark.absolute = 3GB  # match container limit × 0.75
+```
+
+## Prevention
+
+- Alert at 70% of watermark (before alarm fires)
+- Set `vm_memory_high_watermark.absolute` in containers
+- Keep `delivery-limit` on quorum queues (prevents indefinite redelivery accumulation)
+- Configure `max-length` on all queues as a safety net
+
+## AceMQ Take
+
+- Memory alarms blocking publishers is a customer-facing incident. Treat it as P1.
+- The container watermark trap has caused production incidents at multiple organizations. If you're running in a container, verify your watermark configuration right now.

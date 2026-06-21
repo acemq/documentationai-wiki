@@ -1,0 +1,61 @@
+---
+title: Standalone vs. Cluster
+section: 03 — Architecture
+layer: L3
+audience: [architect, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Standalone vs. Cluster
+
+## When a single node is enough
+
+A standalone RabbitMQ node is appropriate for:
+- Development and CI environments
+- Workloads where message loss on restart is acceptable
+- Low-volume internal tools with no HA requirement
+- RabbitMQ acting as a local proxy/buffer, not the source of truth
+
+## When you need a cluster
+
+| Requirement | Cluster needed? |
+|---|---|
+| Message durability across node failures | Yes |
+| Zero-downtime rolling upgrades | Yes |
+| > ~50k msg/s sustained throughput | Yes (horizontal scale) |
+| Management UI HA | Yes |
+| Quorum queues (Raft) | Yes (minimum 3 nodes) |
+
+## Minimum cluster sizes
+
+| Use case | Minimum nodes |
+|---|---|
+| Development | 1 |
+| Quorum queues (tolerates 1 failure) | 3 |
+| Quorum queues (tolerates 2 failures) | 5 |
+| Production HA | 3 |
+
+Never deploy a 2-node cluster for production. A 2-node cluster has no failure tolerance for quorum queues (requires 2-of-2 = no tolerance) and creates a split-brain scenario.
+
+## Resource requirements per node (3-node cluster baseline)
+
+| Resource | Minimum | Recommended |
+|---|---|---|
+| CPU cores | 4 | 8–16 |
+| RAM | 4 GB | 16–32 GB |
+| Disk (WAL + data) | 50 GB | 200 GB+ NVMe |
+| Network | 1 Gbps | 10 Gbps |
+
+## Cluster topology options
+
+**Symmetric:** All nodes identical, all queues potentially on all nodes. Simplest to manage.
+
+**Dedicated storage nodes:** Some nodes host only queue data (no publishers connecting directly). Useful at very high message volumes.
+
+**Arbiter nodes:** Nodes that participate in Raft elections but hold no queue data. Useful to achieve odd-number quorums without full storage overhead.
+
+## AceMQ Take
+
+- Start with 3 nodes, even for small production deployments. Adding nodes later is possible but requires care around quorum queue replicas.
+- Size RAM generously. RabbitMQ caches messages and queue indexes in memory; pressure leads to flow control.

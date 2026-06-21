@@ -1,0 +1,63 @@
+---
+title: Upgrade Overview
+section: 10 — Upgrades
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Upgrade Overview
+
+## Version support policy
+
+| Version | Status | End of support |
+|---|---|---|
+| 3.12 | EOL | December 2024 |
+| 3.13 | EOL | August 2025 |
+| 4.0 | EOL | March 2026 |
+| 4.1 | EOL | June 2026 |
+| 4.2 | Active | September 2026 |
+
+## Upgrade path rules
+
+**No minor-version skipping.** You must step through each minor version:
+
+```
+3.12 → 3.13 → 4.0 → 4.1 → 4.2
+```
+
+Skipping from 3.13 to 4.1 is not supported and may result in data loss or corruption.
+
+## Key breaking changes by version
+
+| Version | Breaking change |
+|---|---|
+| 4.0 | Classic mirrored queues REMOVED. Must migrate to quorum queues first. |
+| 4.0 | Default queue type changed to `quorum` if not specified |
+| 4.1 | Mnesia deprecated; Khepri becomes default metadata store |
+| 4.3 | Mnesia removed; partition handling strategies removed |
+
+## Erlang version requirements
+
+| RabbitMQ version | Minimum Erlang | Recommended Erlang |
+|---|---|---|
+| 3.13 | 26.0 | 26.2 |
+| 4.0 | 26.0 | 27.x |
+| 4.1 | 26.2 | 27.x |
+| 4.2 | 26.2 | 27.x |
+
+## Upgrade process summary
+
+1. **Read the release notes** for your target version
+2. **Back up definitions** and data
+3. **Test on staging** with production-representative load
+4. **Rolling upgrade** one node at a time
+5. **Verify** each node before proceeding
+6. **Rebalance leaders** after all nodes upgraded
+
+## AceMQ Take
+
+- Never upgrade production without first testing the same upgrade path on a staging cluster with production data and load.
+- The 3.13 → 4.0 upgrade is the highest-risk step. Classic mirrored queues are removed in 4.0; any cluster still using them cannot upgrade without first migrating to quorum queues.
+- Schedule upgrade windows with at least 2× the expected time. Unexpected issues during rolling upgrades are common.

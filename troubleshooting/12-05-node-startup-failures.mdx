@@ -1,0 +1,104 @@
+---
+title: Node Startup Failures
+section: 12 — Troubleshooting
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Node Startup Failures
+
+## Symptoms
+
+- `systemctl start rabbitmq-server` fails
+- Node starts but doesn't join cluster
+- Node starts and immediately exits
+- Management UI shows node as disconnected
+
+## Initial diagnosis
+
+```bash
+# Check service status
+systemctl status rabbitmq-server
+
+# Check recent log output
+tail -100 /var/log/rabbitmq/rabbit.log
+
+# Check for core Erlang errors
+tail -50 /var/log/rabbitmq/rabbit@$(hostname)-sasl.log
+
+# Try starting manually to see live output
+rabbitmqctl start_app
+```
+
+## Common startup failures
+
+### Erlang cookie mismatch
+
+```bash
+# Error in logs:
+# "Cookie mismatch" or "cannot connect to node"
+
+# Verify all nodes have the same cookie
+ssh node1 "md5sum /var/lib/rabbitmq/.erlang.cookie"
+ssh node2 "md5sum /var/lib/rabbitmq/.erlang.cookie"
+# Should match
+
+# Fix: copy the correct cookie to the mismatch node
+```
+
+### EPMD not running
+
+```bash
+# Error: "erl_epmd connect" or "nodes in cluster ... are unreachable"
+
+# Verify EPMD is running
+epmd -names  # should list RabbitMQ nodes
+
+# If EPMD is not running
+epmd -daemon
+# Or restart RabbitMQ which starts EPMD automatically
+```
+
+### Port already in use
+
+```bash
+# Error: "already running" or "port in use"
+
+# Check for existing RabbitMQ process
+pgrep -fa beam
+
+# If stale process
+pkill -9 beam  # caution: kills all Erlang processes on the node
+sudo systemctl start rabbitmq-server
+```
+
+### Data directory permission issue
+
+```bash
+# Error: "permission denied" for mnesia or data directory
+
+ls -la /var/lib/rabbitmq/
+# Should be owned by rabbitmq:rabbitmq
+
+chown -R rabbitmq:rabbitmq /var/lib/rabbitmq/
+```
+
+### Corrupted data directory
+
+```bash
+# Error: "cannot read schema" or "corrupt Khepri DB"
+
+# If this node is part of a cluster, let it resync from peers:
+mv /var/lib/rabbitmq/mnesia/rabbit@$(hostname) \
+   /var/lib/rabbitmq/mnesia/rabbit@$(hostname).bak
+sudo systemctl start rabbitmq-server
+# Node will get fresh state from cluster peers
+```
+
+## AceMQ Take
+
+- The Erlang cookie mismatch is the single most common cluster formation failure. Always verify cookie consistency before diagnosing anything else.
+- Corrupted data directory is rare but recoverable in a clustered setup. The node will resync from peers. Don't manually edit the data directory.
+- If EPMD is unavailable, no Erlang distribution works. Check firewall rules for port 4369 and verify EPMD is running before debugging higher-level issues.

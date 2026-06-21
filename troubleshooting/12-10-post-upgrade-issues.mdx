@@ -1,0 +1,119 @@
+---
+title: Post-Upgrade Issues
+section: 12 — Troubleshooting
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Post-Upgrade Issues
+
+## Node won't start after upgrade
+
+```bash
+# Check logs for upgrade-specific errors
+tail -200 /var/log/rabbitmq/rabbit.log | grep -E '(error|upgrade|migration)'
+
+# Common cause: Erlang version too old for new RabbitMQ
+erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
+# Must meet minimum Erlang version for target RabbitMQ version
+
+# If Erlang upgrade is needed:
+sudo apt-get install erlang=<required-version>
+```
+
+## Classic mirrored queues discovered after upgrade to 4.0
+
+```bash
+# Error in logs: "classic_mirrored_queue_not_supported"
+# or: Cluster refuses to start 4.0 because HA policy exists
+
+# Check which policies are the problem
+rabbitmqctl -n rabbit@any-39-node list_policies | grep ha-mode
+
+# From a 3.13 node, remove HA policies
+rabbitmqctl -n rabbit@node1 clear_policy ha-all
+
+# Retry the 4.0 upgrade
+```
+
+## Feature flag not enabled after upgrade
+
+```bash
+# After a rolling upgrade, some feature flags may not auto-enable
+rabbitmqctl list_feature_flags
+
+# Enable all stable feature flags
+rabbitmqctl enable_feature_flag all
+
+# If a specific flag is causing issues, disable by not enabling it
+# (flags can only be enabled, not disabled)
+```
+
+## Khepri migration failed or stuck (4.0 → 4.1)
+
+```bash
+# Check Khepri status
+rabbitmqctl eval 'rabbit_khepri:is_enabled().'
+
+# If false, attempt manual migration
+rabbitmqctl enable_feature_flag khepri_db
+
+# Check for migration errors
+grep 'khepri' /var/log/rabbitmq/rabbit.log | tail -50
+
+# If migration is stuck, restart can help:
+sudo systemctl restart rabbitmq-server
+```
+
+## Performance regression after upgrade
+
+```bash
+# Compare metrics before and after
+# Check Grafana for WAL latency change, throughput change
+
+# If WAL latency increased after upgrade: check if WAL format changed
+# Check RabbitMQ 4.x release notes for WAL changes
+
+# Verify configuration was carried forward
+diff /etc/rabbitmq/rabbitmq.conf /etc/rabbitmq/rabbitmq.conf.pre-upgrade
+
+# Re-run perf-test against new version
+java -jar perf-test.jar --uri amqp://... --quorum-queue --flag persistent \
+  --confirm 100 --producers 2 --consumers 2 --time 60
+```
+
+## Plugin compatibility issues
+
+```bash
+# Check for incompatible plugins after upgrade
+rabbitmq-plugins list | grep -v 'E'
+# Plugins without [E] are not enabled
+
+# Re-enable needed plugins
+rabbitmq-plugins enable rabbitmq_prometheus
+rabbitmq-plugins enable rabbitmq_shovel rabbitmq_shovel_management
+```
+
+## Mixed-version cluster (partial upgrade)
+
+```bash
+# If upgrade failed mid-way, you have a mixed version cluster
+rabbitmqctl cluster_status | grep running_nodes
+for node in node1 node2 node3; do
+  rabbitmqctl -n rabbit@$node version 2>/dev/null
+done
+
+# Resolution options:
+# A) Complete the upgrade (go forward)
+# B) Downgrade the partial node (restore from snapshot)
+# Mixed version is supported briefly during rolling upgrades
+# but should not persist
+```
+
+## AceMQ Take
+
+- Keep your pre-upgrade definitions backup and disk snapshot until the cluster has been running stably for 48 hours. This is your only rollback path.
+- The most common post-upgrade issue is a feature flag or plugin that wasn't re-enabled after the upgrade. Verify your monitoring and management tooling immediately after the upgrade.
+- If you hit a blocking bug in the new version, open a GitHub issue with full logs and diagnostic output. The RabbitMQ team is responsive to regression reports with reproduction steps.

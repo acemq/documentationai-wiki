@@ -1,0 +1,74 @@
+---
+title: Multi-tenant Policy Framework
+section: 02 — Queue Types
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Multi-tenant Policy Framework
+
+## Policies vs x-arguments
+
+| | Policy | x-argument |
+|---|---|---|
+| Updatable without redeploy | ✅ Yes | ❌ No — must delete queue |
+| Scoped by pattern | ✅ Yes | ❌ Per-queue only |
+| Operator override | ✅ Operator policies | ❌ N/A |
+| Source of truth | Broker | Application code |
+
+**Prefer policies over hardcoded x-arguments** for every setting that might need tuning in production.
+
+## Policy structure
+
+```bash
+rabbitmqctl set_policy <name> <pattern> <definition> \
+  --apply-to <queues|exchanges|classic-queues|quorum-queues|streams|all> \
+  --priority <integer> \
+  --vhost <vhost>
+```
+
+Higher priority wins when multiple policies match the same resource.
+
+## Operator policies
+
+Operator policies override user policies. Use them to enforce cluster-wide floors/ceilings:
+
+```bash
+# Enforce max queue depth cluster-wide
+rabbitmqctl set_operator_policy global-max-len ".*" \
+  '{"max-length": 1000000}' --apply-to queues
+
+# Enforce delivery limit on all quorum queues
+rabbitmqctl set_operator_policy global-delivery-limit ".*" \
+  '{"delivery-limit": 5}' --apply-to quorum-queues
+```
+
+## Multi-tenant pattern
+
+For a multi-tenant deployment where each team owns a namespace:
+
+```bash
+# Team A: payments namespace
+rabbitmqctl set_policy payments-qos "^payments\." \
+  '{"delivery-limit": 3, "max-length": 500000}' \
+  --apply-to quorum-queues --priority 5 --vhost production
+
+# Team B: analytics namespace (higher retention)
+rabbitmqctl set_policy analytics-retention "^analytics\." \
+  '{"message-ttl": 604800000}' \
+  --apply-to queues --priority 5 --vhost production
+```
+
+## Policy inheritance and merge
+
+When multiple policies match the same queue, the highest-priority policy applies. For **operator + user policy**, both can apply simultaneously if they define different keys — the broker merges their definitions.
+
+If both policies define the same key, the operator policy wins.
+
+## AceMQ Take
+
+- Establish baseline operator policies for delivery-limit and max-length before any team deploys queues.
+- Use naming conventions (prefixes) to enable per-team policy targeting: `payments.orders`, `analytics.events`.
+- Document your policy registry in a config repo, not in the broker's memory.

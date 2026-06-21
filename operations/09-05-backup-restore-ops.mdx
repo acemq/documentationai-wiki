@@ -1,0 +1,91 @@
+---
+title: Backup & Restore Operations
+section: 09 — Operations
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Backup & Restore Operations
+
+## What to back up
+
+| Data | Criticality | Method |
+|---|---|---|
+| Definitions (users, vHosts, queues, policies) | Critical | Export definitions API |
+| Message data | High | Disk snapshot (if persistent) |
+| Erlang cookie | Critical | Secrets manager backup |
+| TLS certificates | High | Secrets manager / cert store |
+
+## Definitions backup
+
+```bash
+# Export all definitions
+curl -u admin:pass \
+  https://rabbitmq.internal:15671/api/definitions \
+  -o /backups/rabbitmq/definitions-$(date +%Y%m%d).json
+
+# Or via CLI
+rabbitmqctl export_definitions /backups/rabbitmq/definitions-$(date +%Y%m%d).json
+```
+
+Definitions include: users, vHosts, permissions, queues, exchanges, bindings, policies, parameters.
+
+## Automated backup via cron
+
+```bash
+# /etc/cron.d/rabbitmq-backup
+0 2 * * * rabbitmq /usr/sbin/rabbitmqctl export_definitions \
+  /backups/rabbitmq/definitions-$(date +%Y%m%d-%H%M).json && \
+  aws s3 cp /backups/rabbitmq/definitions-$(date +%Y%m%d-%H%M).json \
+  s3://company-backups/rabbitmq/
+```
+
+## Message data backup
+
+Message data is stored in `/var/lib/rabbitmq/mnesia/` (or the configured data directory):
+
+```bash
+# Stop the node before taking a disk backup
+rabbitmqctl stop_app
+# Take snapshot (EBS snapshot, LVM snapshot, etc.)
+# Start the node
+rabbitmqctl start_app
+```
+
+For Kubernetes with PVCs:
+```bash
+# Take a VolumeSnapshot
+kubectl apply -f - <<EOF
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: rabbitmq-data-snapshot-$(date +%Y%m%d)
+spec:
+  volumeSnapshotClassName: csi-aws-vsc
+  source:
+    persistentVolumeClaimName: persistence-rabbit-rabbitmq-0
+EOF
+```
+
+## Restore procedure
+
+```bash
+# 1. Start a fresh broker
+# 2. Import definitions
+rabbitmqctl import_definitions /backups/rabbitmq/definitions-20260601.json
+
+# 3. Verify
+rabbitmqctl list_vhosts
+rabbitmqctl list_users
+rabbitmqctl list_queues --formatter pretty_table
+```
+
+Message data restore requires restoring the data directory before starting RabbitMQ.
+
+## AceMQ Take
+
+- Back up definitions daily and before every upgrade. Message data backup depends on your RPO; most teams can tolerate losing in-flight messages (they were not yet processed) but not queue/exchange topology.
+- Test the restore procedure quarterly. A backup that has never been tested is not a backup.
+- The Erlang cookie is not included in definitions exports. Back it up separately in your secrets manager.

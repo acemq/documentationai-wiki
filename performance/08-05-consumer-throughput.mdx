@@ -1,0 +1,95 @@
+---
+title: Consumer Throughput
+section: 08 — Performance
+layer: L3
+audience: [developer, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Consumer Throughput
+
+## Consumer utilization
+
+Consumer utilization is the fraction of time a consumer is able to receive new messages. A utilization of 1.0 (100%) means the consumer is always ready — messages deliver as fast as it can process them.
+
+```promql
+# Consumer utilization per queue (1.0 = fully utilized)
+rabbitmq_queue_consumer_utilisation
+```
+
+If utilization < 0.5, consumers are spending half their time idle — prefetch is likely too low.
+
+## Prefetch optimization
+
+```python
+# Start: conservative
+channel.basic_qos(prefetch_count=10)
+
+# After measuring utilization, increase:
+channel.basic_qos(prefetch_count=50)
+# Re-measure. If throughput increases and utilization stays < 0.9, increase again.
+```
+
+## Multiple consumers per queue
+
+Scale throughput by adding consumers:
+
+```python
+import threading
+
+def start_consumer(queue_name, consumer_id):
+    conn = pika.BlockingConnection(params)
+    ch = conn.channel()
+    ch.basic_qos(prefetch_count=20)
+    ch.basic_consume(queue=queue_name, on_message_callback=process)
+    ch.start_consuming()
+
+# 4 consumer threads on the same queue
+for i in range(4):
+    t = threading.Thread(target=start_consumer, args=("orders", i))
+    t.daemon = True
+    t.start()
+```
+
+## Consumer throughput formula
+
+```
+Max throughput = (1000ms / processing_time_ms) * prefetch * consumer_count
+
+Example:
+  processing_time = 10ms
+  prefetch = 20
+  consumers = 5
+  max_throughput = 100 * 20 * 5 = 10,000 msg/s (theoretical)
+```
+
+Actual throughput is lower due to network overhead, ack round-trips, and variable processing time.
+
+## Parallel processing with async consumers
+
+```python
+import asyncio
+import aio_pika
+
+async def process(message: aio_pika.IncomingMessage):
+    async with message.process():
+        # async processing
+        await asyncio.sleep(0.01)  # simulate 10ms work
+
+async def main():
+    conn = await aio_pika.connect_robust("amqp://...")
+    channel = await conn.channel()
+    await channel.set_qos(prefetch_count=100)
+    queue = await channel.declare_queue("orders", durable=True)
+    await queue.consume(process)
+    await asyncio.Future()  # run forever
+
+asyncio.run(main())
+```
+
+## AceMQ Take
+
+- Always check consumer utilization before scaling. A single consumer with utilization of 0.3 doesn't need more consumers; it needs higher prefetch.
+- For latency-sensitive queues, keep consumer utilization < 0.8. Above that, message queue time increases due to prefetch saturation.
+- Horizontal scaling (more consumer instances) and vertical scaling (higher prefetch per consumer) are complementary. Start with higher prefetch, then add consumers.

@@ -1,0 +1,81 @@
+---
+title: Message Loss
+section: 12 — Troubleshooting
+layer: L3
+audience: [developer, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Message Loss
+
+## When message loss can occur
+
+| Scenario | At-risk messages | Prevention |
+|---|---|---|
+| Broker crash before WAL sync | Unconfirmed messages | Publisher confirms |
+| Consumer crash before ack | Unacknowledged messages | Manual ack |
+| Queue auto-delete while consumers offline | All messages | Durable queue |
+| TTL expiry | Expired messages | Set appropriate TTL |
+| `max-length` overflow | Oldest messages | `reject-publish` overflow policy |
+| No DLX configured, delivery-limit hit | Messages at limit | Always configure DLX |
+| Connection.blocked ignored, timeout | Unconfirmed batch | Handle `connection.blocked` |
+
+## Diagnosing suspected message loss
+
+```bash
+# Check dead-letter queues for messages that were rejected
+rabbitmqctl list_queues name messages --formatter pretty_table | grep dead
+
+# Check if messages expired (TTL)
+rabbitmqctl list_queues name message_stats.publish_details.rate \
+  message_stats.deliver_get_details.rate --formatter pretty_table
+
+# Check overflow events
+rabbitmqctl list_queues name message_stats.drop_unroutable_details --formatter pretty_table
+
+# Check redelivered count (messages being processed multiple times = not lost)
+rabbitmqctl list_queues name messages_redelivered --formatter pretty_table
+```
+
+## Confirm that confirms are enabled
+
+```python
+# This is the single most impactful change for preventing message loss
+
+# Python (pika)
+channel.confirm_delivery()  # enable
+
+# Java (amqp-client)
+channel.confirmSelect();  # enable
+
+# Go (amqp091-go)
+channel.Confirm(false)  # enable
+```
+
+## Verify queue is durable
+
+```bash
+# Check queue durability
+rabbitmqctl list_queues name durable --formatter pretty_table
+
+# All production queues should show durable = true
+```
+
+## Prevent overflow loss
+
+```bash
+# Set max-length with reject-publish (publisher gets basic.nack)
+rabbitmqctl set_policy max-length "^orders" \
+  '{"max-length": 1000000, "overflow": "reject-publish"}' \
+  --apply-to queues
+
+# With drop-head (default), oldest messages are silently dropped
+# With reject-publish, the publisher is notified and can retry
+```
+
+## AceMQ Take
+
+- Every message loss investigation starts with the same question: were publisher confirms enabled? If not, the message may have been dropped before the broker acknowledged it.
+- `reject-publish` overflow is almost always better than `drop-head`. The publisher learns the message wasn't accepted and can decide what to do (retry, alert, log).
+- If you find messages in the dead-letter queue when you expect them in the main queue, it's not loss — it's delivery limit reached. Check your DLX configuration.

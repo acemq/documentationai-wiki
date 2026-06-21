@@ -1,0 +1,97 @@
+---
+title: Node.js Client
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Node.js Client (amqplib)
+
+## Package
+
+```bash
+npm install amqplib
+```
+
+## Connection and channel
+
+```javascript
+const amqp = require('amqplib');
+
+async function connect() {
+  const conn = await amqp.connect({
+    protocol: 'amqps',
+    hostname: 'rabbitmq.internal',
+    port: 5671,
+    username: 'app-svc',
+    password: process.env.RABBITMQ_PASSWORD,
+    vhost: 'production',
+    heartbeat: 60
+  });
+
+  const ch = await conn.createConfirmChannel();
+  return { conn, ch };
+}
+```
+
+## Publishing with confirms
+
+```javascript
+async function publish(ch, exchange, routingKey, payload) {
+  const body = Buffer.from(JSON.stringify(payload));
+  const opts = {
+    contentType: 'application/json',
+    deliveryMode: 2, // persistent
+    messageId: crypto.randomUUID()
+  };
+
+  return new Promise((resolve, reject) => {
+    ch.publish(exchange, routingKey, body, opts, (err, ok) => {
+      if (err) reject(err);
+      else resolve(ok);
+    });
+  });
+}
+```
+
+## Consumer with manual ack
+
+```javascript
+await ch.prefetch(20);
+
+await ch.consume('orders', async (msg) => {
+  if (!msg) return; // cancelled
+
+  try {
+    const payload = JSON.parse(msg.content.toString());
+    await processOrder(payload);
+    ch.ack(msg);
+  } catch (err) {
+    const requeue = isRetryable(err);
+    ch.nack(msg, false, requeue);
+  }
+}, { noAck: false });
+```
+
+## Connection error handling
+
+```javascript
+conn.on('error', (err) => {
+  console.error('Connection error:', err.message);
+  // reconnect with backoff
+  setTimeout(connect, 5000);
+});
+
+conn.on('close', () => {
+  console.log('Connection closed, reconnecting...');
+  setTimeout(connect, 5000);
+});
+```
+
+## AceMQ Take
+
+- Use `createConfirmChannel()` not `createChannel()`. Confirm channels include ack/nack callbacks.
+- In production, wrap `amqplib` with a reconnection library like `amqplib-retry` or implement your own backoff loop.
+- Node.js is single-threaded; all AMQP I/O is non-blocking. One channel per application instance is typically sufficient, unlike multi-threaded environments.

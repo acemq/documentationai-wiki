@@ -1,0 +1,82 @@
+---
+title: Pre-Upgrade Checklist
+section: 10 — Upgrades
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Pre-Upgrade Checklist
+
+## 1. Read the release notes
+
+- [ ] Read the release notes for every version between current and target
+- [ ] Identify any breaking changes that affect your configuration
+- [ ] Check Erlang compatibility matrix
+
+## 2. Assess your current deployment
+
+```bash
+# Current RabbitMQ version
+rabbitmqctl version
+
+# Current Erlang version
+erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
+
+# Queue types in use
+rabbitmqctl list_queues name type --formatter pretty_table | sort -k2
+
+# Any classic mirrored queues? (blocker for 4.0 upgrade)
+rabbitmqctl list_queues name type | grep classic
+```
+
+## 3. Check for 4.0 blockers
+
+- [ ] No classic mirrored queues (ha-mode policy applied to any queue)
+- [ ] No deprecated `ha-mode` policies
+
+```bash
+# Check for HA (mirrored) policies
+rabbitmqctl list_policies | grep ha-mode
+
+# Should return empty. If not, migrate to quorum queues first.
+```
+
+## 4. Backup
+
+- [ ] Export definitions: `rabbitmqctl export_definitions /backup/definitions-pre-upgrade.json`
+- [ ] Erlang cookie backed up in secrets manager
+- [ ] Disk snapshot of data directory (if message durability is required)
+
+## 5. Staging validation
+
+- [ ] Test upgrade on staging with same RabbitMQ version
+- [ ] Run application integration tests against upgraded staging cluster
+- [ ] Verify consumer lag does not spike during upgrade
+- [ ] Verify WAL latency is within bounds on new version
+
+## 6. Plan the window
+
+- [ ] Rollback plan documented (downgrade is not supported; rollback = restore from backup)
+- [ ] Maintenance window scheduled with stakeholders
+- [ ] Oncall engineer assigned for the duration
+- [ ] Monitoring dashboards open and watched
+
+## 7. Pre-upgrade state
+
+```bash
+# Verify cluster is healthy
+rabbitmq-diagnostics cluster_status
+rabbitmq-diagnostics check_local_alarms
+
+# No alarms should be active
+# All nodes should be running
+# Quorum should be maintained for all queues
+rabbitmq-queues check_quorum_status
+```
+
+## AceMQ Take
+
+- The most common upgrade failure: a classic mirrored queue is discovered mid-upgrade after the 3.13→4.0 version bump. Audit queue types weeks before the upgrade.
+- "Test on staging" means running production load patterns, not just smoke tests. RabbitMQ performance issues often only surface under production volumes.

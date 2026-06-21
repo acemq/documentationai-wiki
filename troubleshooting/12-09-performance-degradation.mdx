@@ -1,0 +1,85 @@
+---
+title: Performance Degradation
+section: 12 — Troubleshooting
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Performance Degradation
+
+## Symptoms
+
+- Throughput dropped significantly from baseline
+- Publish confirm latency increased
+- Consumer delivery rate reduced
+- High CPU on RabbitMQ nodes
+- Memory usage elevated
+
+## Systematic diagnosis
+
+```bash
+# 1. Check WAL latency first (most common cause)
+# In Prometheus: histogram_quantile(0.99, rate(rabbitmq_ra_log_wal_write_duration_seconds_bucket[5m]))
+# Target: < 10ms
+
+# 2. Check CPU
+top -b -n1 | grep -A5 beam  # on each node
+# High CPU: check what processes are consuming it
+rabbitmqctl eval 'recon:proc_count(reductions, 5).'
+
+# 3. Check memory
+rabbitmq-diagnostics memory_breakdown
+# Growing binary/queue process memory = consumer lag or large messages
+
+# 4. Check Erlang scheduler utilization
+rabbitmqctl eval 'scheduler:utilization(5000).'
+# Values near 1.0 mean schedulers are saturated
+```
+
+## High CPU causes
+
+| Cause | Indicator | Fix |
+|---|---|---|
+| Message routing overhead | High routing CPU in `recon` output | Fewer bindings; topic exchange patterns |
+| Frequent GC | High memory allocation rate | Reduce message size; increase prefetch |
+| Raft consensus overhead | High `ra` process CPU | Reduce quorum queue count; tune WAL batch |
+| Connection churn | Many short-lived connections in logs | Fix client connection pooling |
+
+## Sudden throughput drop
+
+```bash
+# Has anything changed? Check recent deployments, config changes
+git log --oneline -10  # check infrastructure code
+
+# Check if a node restarted recently
+rabbitmq-diagnostics environment | grep start_time
+
+# Check if leaders moved (leader on overloaded node)
+rabbitmqctl list_queues name leader --formatter pretty_table
+
+# Rebalance if leaders are skewed
+rabbitmq-queues rebalance quorum
+```
+
+## Network degradation
+
+```bash
+# Check packet loss between nodes
+ping -c 100 node2 | tail -2
+
+# Check inter-node communication latency
+rabbitmqctl eval 'timer:tc(net_adm, ping, [rabbit@node2]).'
+# Returns {MicrosecondTime, pong}
+# > 1000 us = 1ms latency between nodes
+
+# Check for network errors
+netstat -s | grep -E '(error|retransmit)'
+```
+
+## AceMQ Take
+
+- Start every performance degradation investigation with the WAL latency metric. 80%+ of throughput drops in quorum queue deployments trace back to disk I/O.
+- Rebalance quorum leaders after any node restart. All leaders on one node creates a throughput and memory hotspot.
+- Network degradation is insidious because it affects Raft replication latency, which directly impacts confirm throughput. Always check inter-node latency when throughput drops without an obvious cause.

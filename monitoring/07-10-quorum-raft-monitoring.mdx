@@ -1,0 +1,89 @@
+---
+title: Quorum & Raft Monitoring
+section: 07 — Monitoring
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Quorum & Raft Monitoring
+
+## Raft health metrics
+
+| Metric | Normal | Concerning |
+|---|---|---|
+| `rabbitmq_quorum_queue_raft_term_total` | Stable (grows only on restarts) | Increasing > 5/min |
+| `rabbitmq_ra_log_wal_write_duration_seconds` p99 | < 5ms | > 10ms sustained |
+| `rabbitmq_quorum_queue_raft_log_last_applied` | Consistent across replicas | Diverging (lagging follower) |
+| `rabbitmq_quorum_queue_raft_log_commit_latency_seconds` | < 100ms | > 500ms |
+
+## CLI health checks
+
+```bash
+# Quorum status of a specific queue
+rabbitmq-queues quorum_status <vhost> <queue>
+# Output: shows leader, followers, quorum status
+
+# Check if this node is quorum-critical
+rabbitmq-diagnostics check_if_node_is_quorum_critical
+# Returns exit code 1 if removing this node would break quorum
+
+# List quorum queue members
+rabbitmqctl list_queues name type leader members --formatter pretty_table
+```
+
+## Leader distribution
+
+After node restarts, quorum queue leaders may all land on a single node:
+
+```bash
+# Check leader distribution
+rabbitmqctl list_queues name leader --formatter pretty_table | sort -k2
+
+# Rebalance leaders across nodes
+rabbitmq-queues rebalance quorum --vhost production
+```
+
+## Detecting a lagging replica
+
+```promql
+# Compare commit index across replicas of the same queue
+# A replica with a significantly lower index is lagging
+rabbitmq_quorum_queue_raft_log_commit_index
+```
+
+A lagging replica that falls too far behind will trigger a log snapshot transfer, which is expensive. Alert if any replica lags > 50k entries from the leader.
+
+## Prometheus alerts for Raft
+
+```yaml
+- alert: RaftLeadershipInstability
+  expr: rate(rabbitmq_quorum_queue_raft_term_total[5m]) > 1
+  for: 5m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Quorum queue Raft leader elections occurring frequently"
+
+- alert: RaftWalLatencyHigh
+  expr: histogram_quantile(0.99, rate(rabbitmq_ra_log_wal_write_duration_seconds_bucket[5m])) > 0.01
+  for: 10m
+  labels:
+    severity: critical
+  annotations:
+    summary: "WAL write p99 latency > 10ms — publisher confirms delayed"
+
+- alert: QuorumCriticalNode
+  expr: rabbitmq_quorum_queue_quorum_critical == 1
+  labels:
+    severity: critical
+  annotations:
+    summary: "Node is quorum-critical — do not stop it"
+```
+
+## AceMQ Take
+
+- Always check `check_if_node_is_quorum_critical` before any maintenance operation. Stopping a quorum-critical node makes affected queues unavailable.
+- WAL latency > 10ms sustained is a hardware problem, not a RabbitMQ problem. Investigate disk I/O before tuning RabbitMQ configuration.
+- Run `rabbitmq-queues rebalance quorum` after every rolling upgrade. Leaders drift over time and create hotspots.

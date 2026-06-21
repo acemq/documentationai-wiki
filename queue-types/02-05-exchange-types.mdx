@@ -1,0 +1,86 @@
+---
+title: Exchange Types
+section: 02 — Queue Types
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Exchange Types
+
+## Direct exchange
+
+Routes messages to queues where the binding key exactly matches the routing key.
+
+```python
+# Declare
+channel.exchange_declare("orders", "direct", durable=True)
+channel.queue_bind("orders.uk", "orders", routing_key="UK")
+channel.queue_bind("orders.us", "orders", routing_key="US")
+
+# Publish
+channel.basic_publish(exchange="orders", routing_key="UK", body=msg)
+# → goes to orders.uk only
+```
+
+## Topic exchange
+
+Routes using pattern matching. `*` matches exactly one word; `#` matches zero or more words.
+
+```python
+channel.exchange_declare("events", "topic", durable=True)
+channel.queue_bind("payments.all", "events", routing_key="payments.#")
+channel.queue_bind("payments.uk",  "events", routing_key="payments.*.UK")
+
+# "payments.created.UK" → both queues
+# "payments.updated.US" → payments.all only
+```
+
+## Fanout exchange
+
+Delivers to all bound queues, ignoring the routing key. Useful for broadcast events.
+
+```python
+channel.exchange_declare("notifications", "fanout", durable=True)
+channel.queue_bind("notify.email", "notifications", routing_key="")
+channel.queue_bind("notify.sms",   "notifications", routing_key="")
+channel.queue_bind("notify.push",  "notifications", routing_key="")
+```
+
+## Headers exchange
+
+Routes based on message header attributes instead of routing key. Rarely used but powerful for attribute-based routing.
+
+```python
+channel.exchange_declare("header-router", "headers", durable=True)
+channel.queue_bind(
+    "premium-queue", "header-router", routing_key="",
+    arguments={"x-match": "all", "tier": "premium", "region": "EU"}
+)
+```
+
+`x-match: all` = all headers must match; `x-match: any` = at least one must match.
+
+## Default exchange
+
+Every broker has a pre-declared nameless direct exchange (`""`):
+- Every queue is automatically bound to it with a routing key equal to its name
+- Useful for quick tests: `basic_publish(exchange="", routing_key="my-queue")`
+- Avoid in production code — it couples publishers to queue names
+
+## Exchange-to-exchange bindings
+
+Exchanges can bind to other exchanges for fan-out hierarchies:
+
+```bash
+rabbitmqctl set_parameter shovel ... # or use the management API
+# Via AMQP:
+channel.exchange_bind(destination="downstream", source="upstream", routing_key="")
+```
+
+## AceMQ Take
+
+- Topic exchanges are the most flexible for event-driven systems. Build routing key patterns as part of your API contract.
+- Don't use headers exchanges unless topic routing genuinely can't express your routing logic.
+- Declare exchanges as durable unless they are explicitly transient.

@@ -1,0 +1,109 @@
+---
+title: Disaster Recovery Runbook
+section: 11 — HA & DR
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Disaster Recovery Runbook
+
+## Scenario 1: Single node failure
+
+**Symptoms:** One node unreachable; cluster still operational.
+
+```bash
+# 1. Verify the issue
+rabbitmqctl cluster_status | grep running_nodes
+# Failed node will not appear
+
+# 2. Check quorum (should still be healthy with 2/3 nodes)
+rabbitmq-queues check_quorum_status  # run from a running node
+
+# 3. Restart the failed node (if transient failure)
+sudo systemctl restart rabbitmq-server  # on failed node
+
+# 4. Verify node rejoined cluster
+rabbitmqctl cluster_status
+
+# 5. Rebalance leaders
+rabbitmq-queues rebalance quorum
+```
+
+**Expected recovery time:** 1– 5 minutes (including Raft log catch-up)
+
+## Scenario 2: Two nodes fail simultaneously (3-node cluster)
+
+**Symptoms:** Cluster unresponsive; quorum lost; publishers blocked.
+
+```bash
+# 1. Verify state
+# Remaining node will not serve publishes (no quorum)
+
+# 2. Recover one of the failed nodes
+sudo systemctl start rabbitmq-server  # on one failed node
+
+# 3. Verify quorum restored
+rabbitmqctl cluster_status
+rabbitmq-queues check_quorum_status
+
+# 4. Start publishing again (publishers will unblock automatically)
+
+# 5. Recover second failed node
+sudo systemctl start rabbitmq-server  # on second failed node
+
+# 6. Rebalance leaders
+rabbitmq-queues rebalance quorum
+```
+
+**Expected recovery time:** 5–15 minutes
+
+## Scenario 3: Full cluster failure
+
+**Symptoms:** All nodes down; no service.
+
+```bash
+# 1. Start nodes in any order
+# (Unlike Mnesia, Khepri/Raft handles arbitrary restart order)
+for node in node1 node2 node3; do
+  ssh $node "sudo systemctl start rabbitmq-server"
+done
+
+# 2. Wait for cluster to reform
+sleep 60
+
+# 3. Verify
+rabbitmqctl cluster_status
+rabbitmq-queues check_quorum_status
+
+# 4. If cluster won't reform, restore from backup:
+rabbitmqctl import_definitions /backup/definitions.json
+```
+
+**Expected recovery time:** 5–60 minutes depending on cause
+
+## Scenario 4: Data corruption
+
+```bash
+# If data corruption is suspected (crash + corrupted WAL)
+
+# 1. Stop the affected node
+sudo rabbitmqctl stop_app
+
+# 2. Clear local data (the node will resync from cluster leader)
+sudo mv /var/lib/rabbitmq/mnesia/rabbit@node1 \
+        /var/lib/rabbitmq/mnesia/rabbit@node1.corrupt
+
+# 3. Start the node
+sudo rabbitmqctl start_app
+
+# The node will receive a fresh snapshot from the Raft leader
+# This may take time for large WALs
+```
+
+## AceMQ Take
+
+- Test scenarios 1 and 2 in staging quarterly. Knowing your actual RTO is more valuable than estimating it.
+- For scenario 3, with Khepri (4.1+) the restart order doesn't matter. With Mnesia (4.0 and older), the last node to leave must be the first to start.
+- Data corruption (scenario 4) is rare with quorum queues. The Raft design is tolerant of individual node failures including storage corruption; the node resynchronizes from peers.

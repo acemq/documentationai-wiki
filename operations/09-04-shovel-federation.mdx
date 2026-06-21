@@ -1,0 +1,93 @@
+---
+title: Shovel & Federation
+section: 09 — Operations
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Shovel & Federation
+
+## Shovel overview
+
+A Shovel is a plugin that moves messages from a source queue to a destination exchange (or queue) on the same or a different broker.
+
+**Use cases:**
+- Cross-datacenter message forwarding
+- Migrating messages between queue types
+- Integrating isolated vHosts
+
+```bash
+rabbitmq-plugins enable rabbitmq_shovel rabbitmq_shovel_management
+```
+
+## Dynamic shovel configuration
+
+```bash
+rabbitmqctl set_parameter shovel orders-to-eu \
+  '{"src-protocol": "amqp091",
+    "src-uri": "amqp://app:pass@us.internal:5672",
+    "src-queue": "orders",
+    "dest-protocol": "amqp091",
+    "dest-uri": "amqp://app:pass@eu.internal:5672",
+    "dest-exchange": "orders",
+    "dest-exchange-key": "order.created",
+    "ack-mode": "on-confirm",
+    "reconnect-delay": 5}'
+
+# Check shovel status
+rabbitmqctl shovel_status
+```
+
+## Shovel ack modes
+
+| Mode | Message safety | Throughput |
+|---|---|---|
+| `on-confirm` | At-least-once | Lower |
+| `on-publish` | At-most-once | Higher |
+| `no-ack` | Fire-and-forget | Highest |
+
+Always use `on-confirm` in production.
+
+## Federation overview
+
+Federation links upstream exchanges or queues to downstream consumers. Unlike Shovel, federation is pull-based — the downstream broker fetches messages when consumers are ready.
+
+**Use cases:**
+- Hub-and-spoke event distribution
+- Multi-region fan-out
+- Decoupled topic subscriptions
+
+```bash
+rabbitmq-plugins enable rabbitmq_federation rabbitmq_federation_management
+
+# Configure upstream
+rabbitmqctl set_parameter federation-upstream us-cluster \
+  '{"uri": "amqp://fed:pass@us.internal:5672",
+    "prefetch-count": 1000,
+    "reconnect-delay": 5}'
+
+# Apply federation policy to exchanges
+rabbitmqctl set_policy federate-events "^events\." \
+  '{"federation-upstream-set": "all"}' \
+  --apply-to exchanges
+```
+
+## Monitoring Shovel and Federation
+
+```bash
+# Shovel status
+rabbitmqctl shovel_status
+
+# Federation link status
+rabbitmqctl federation_status
+
+# Via management UI: Admin > Shovel Status / Federation Status
+```
+
+## AceMQ Take
+
+- Shovel is simpler and more reliable for point-to-point forwarding between two clusters. Federation is better for fan-out patterns where multiple downstream clusters subscribe to an upstream source.
+- Both Shovel and Federation create internal AMQP connections. Account for this in your connection limit planning.
+- Monitor Shovel and Federation link state daily. A disconnected link accumulates a message backlog silently.

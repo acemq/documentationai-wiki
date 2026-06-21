@@ -1,0 +1,67 @@
+---
+title: 4.0 → 4.1 Upgrade Guide
+section: 10 — Upgrades
+layer: L3
+audience: [sre]
+rabbitmq_versions: "4.0 – 4.1"
+last_reviewed: 2026-06
+---
+
+# 4.0 → 4.1 Upgrade Guide
+
+## Notable changes in 4.1
+
+| Change | Impact | Action |
+|---|---|---|
+| Khepri becomes default metadata store | Replaces Mnesia for new clusters | Read Khepri migration notes |
+| AMQP 1.0 improvements | Better compliance | Existing AMQP 0-9-1 clients unaffected |
+| Quorum queue performance improvements | Higher throughput | No action; benefit is automatic |
+| `rabbitmq-streams` CLI additions | New stream management commands | Update automation scripts |
+
+## Khepri migration
+
+When upgrading from 4.0 (Mnesia) to 4.1 (Khepri), a one-time metadata migration occurs:
+
+```bash
+# After upgrading to 4.1, check Khepri status
+rabbitmqctl eval 'rabbit_khepri:is_enabled().'
+# Should return 'true' on new 4.1+ clusters
+
+# Force Khepri migration (if not automatic)
+rabbitmqctl enable_feature_flag khepri_db
+```
+
+The migration is performed online during a rolling upgrade. No downtime is required.
+
+## Feature flags in 4.1
+
+```bash
+# List all feature flags and their status
+rabbitmqctl list_feature_flags
+
+# Enable all stable feature flags after upgrade
+rabbitmqctl enable_feature_flag all
+```
+
+Feature flags cannot be disabled once enabled. Enable only after all nodes are on the new version.
+
+## Verification after 4.0 → 4.1
+
+```bash
+# Version check
+rabbitmqctl version  # should show 4.1.x
+
+# Cluster health
+rabbitmq-diagnostics cluster_status
+
+# Quorum queue health
+rabbitmq-queues check_quorum_status
+
+# Feature flags (all stable should be enabled)
+rabbitmqctl list_feature_flags --formatter pretty_table
+```
+
+## AceMQ Take
+
+- The 4.0 → 4.1 upgrade is lower risk than 3.13 → 4.0. The main consideration is Khepri migration, which is automatic and online.
+- Enable all stable feature flags after the upgrade is complete and verified. This prevents features from being unavailable and helps test feature flag state before the next upgrade.

@@ -1,0 +1,72 @@
+---
+title: 3.13 → 4.0 Upgrade Guide
+section: 10 — Upgrades
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.0"
+last_reviewed: 2026-06
+---
+
+# 3.13 → 4.0 Upgrade Guide
+
+## Breaking changes in 4.0
+
+| Change | Impact | Action required |
+|---|---|---|
+| Classic mirrored queues removed | Cluster won't start if HA policy exists | Migrate to quorum queues first |
+| Default queue type = quorum | New queues without `x-queue-type` become quorum | Application code review |
+| `rabbitmq_management_agent` merged into `rabbitmq_management` | Plugin list | Update plugin configuration |
+| AMQP 1.0 support enabled by default | Port 5672 now handles AMQP 1.0 | Firewall review (port unchanged) |
+
+## Mandatory pre-upgrade steps for 4.0
+
+```bash
+# 1. Find all HA policies
+rabbitmqctl list_policies | grep ha-mode
+
+# 2. Remove HA policies
+rabbitmqctl clear_policy ha-all
+rabbitmqctl clear_policy ha-exactly
+# etc. for each HA policy name
+
+# 3. Verify no mirrored queue argument is set directly
+rabbitmqctl list_queues name arguments | grep ha-mode
+# Should return empty
+
+# 4. Verify no classic queues have slave count
+rabbitmqctl list_queues name slave_pids | awk '$2 != "[]"'
+# Should return empty
+```
+
+## default_queue_type change
+
+In 4.0, if your application declares queues without specifying `x-queue-type`, they become quorum queues (the new default).
+
+If you want classic behavior for specific queues:
+```python
+# Be explicit in declarations
+channel.queue_declare("my-queue", durable=True, arguments={
+    "x-queue-type": "classic"  # or "quorum" for new queues
+})
+```
+
+Or configure default at the broker level:
+```ini
+# rabbitmq.conf
+default_queue_type = classic  # to maintain 3.x behavior
+```
+
+## Plugin updates for 4.0
+
+```bash
+# Before 4.0: both plugins needed
+rabbitmq-plugins enable rabbitmq_management rabbitmq_management_agent
+
+# After 4.0: management_agent is part of management
+rabbitmq-plugins enable rabbitmq_management
+```
+
+## AceMQ Take
+
+- The 3.13 → 4.0 jump is the most complex upgrade in the current version sequence. Plan 4–6 hours of maintenance window and have a rollback plan that includes restoring from the definitions backup.
+- After upgrading to 4.0, validate that all queues behave as expected with quorum semantics: run your publish + consume tests with confirms enabled.

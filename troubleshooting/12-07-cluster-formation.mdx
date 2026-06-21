@@ -1,0 +1,99 @@
+---
+title: Cluster Formation Issues
+section: 12 — Troubleshooting
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Cluster Formation Issues
+
+## Symptoms
+
+- New node doesn't join cluster
+- Cluster has fewer nodes than expected
+- Nodes are listed as `disc` but not running
+- Split-brain (two separate clusters from what should be one)
+
+## Diagnosis
+
+```bash
+# View cluster membership
+rabbitmqctl cluster_status
+
+# List running nodes specifically
+rabbitmqctl cluster_status | grep running_nodes
+
+# Can this node reach other nodes?
+rabbitmqctl eval 'net_adm:ping(rabbit@node2).'
+# Should return 'pong'; 'pang' means unreachable
+
+# Check Erlang node names
+rabbitmqctl eval 'node().'
+# Should return rabbit@<hostname>
+```
+
+## Erlang node name issues
+
+```bash
+# Hostname must resolve to the same name on all nodes
+hostname  # on each node, should match what other nodes expect
+
+# Verify in /etc/hosts
+cat /etc/hosts
+# 10.0.0.1  node1
+# 10.0.0.2  node2
+# 10.0.0.3  node3
+
+# RabbitMQ node name
+rabbitmqctl eval 'node().'  # rabbit@node1
+```
+
+## Port connectivity
+
+```bash
+# Verify inter-node ports are open
+# From node1 to node2:
+nc -zv node2 4369   # EPMD
+nc -zv node2 25672  # Erlang distribution
+
+# Both must succeed
+```
+
+## Peer discovery failures (Kubernetes)
+
+```bash
+# RabbitMQ Kubernetes operator uses DNS peer discovery
+# Check headless service
+kubectl get service rabbitmq-nodes -n messaging
+
+# Verify DNS resolution of headless service
+kubectl exec rabbitmq-server-0 -- \
+  nslookup rabbitmq-nodes.messaging.svc.cluster.local
+```
+
+## Force cluster reformation (last resort)
+
+```bash
+# WARNING: This resets cluster state. Export definitions first.
+
+# On all nodes, in order:
+rabbitmqctl stop_app
+rabbitmqctl reset  # clears cluster membership and data
+rabbitmqctl start_app
+
+# On nodes 2 and 3, join the cluster:
+rabbitmqctl stop_app
+rabbitmqctl join_cluster rabbit@node1
+rabbitmqctl start_app
+
+# Import definitions
+rabbitmqctl import_definitions /backup/definitions.json
+```
+
+## AceMQ Take
+
+- Cluster formation failures are almost always one of three things: wrong Erlang cookie, wrong hostname resolution, or blocked inter-node ports. Check all three before going further.
+- In Kubernetes, the headless Service is what enables peer discovery. If it doesn't exist or doesn't resolve correctly, nodes won't cluster.
+- The `net_adm:ping(rabbit@other-node)` test is the fastest way to verify Erlang distribution connectivity. A `pang` response tells you the network layer is the problem.

@@ -1,0 +1,75 @@
+---
+title: Shovel & Federation Security
+section: 06 — Security
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Shovel & Federation Security
+
+## Securing Shovel connections
+
+Shovel URIs often contain credentials. Store them in the broker's parameter store, not in config files:
+
+```bash
+# Secure: credentials via parameter store
+rabbitmqctl set_parameter shovel dc-link \
+  '{"src-protocol": "amqp091",
+    "src-uri": "amqps://shovel-svc:${SHOVEL_PASSWORD}@remote.internal:5671",
+    "src-queue": "events",
+    "dest-protocol": "amqp091",
+    "dest-uri": "amqps://shovel-svc:${SHOVEL_PASSWORD}@local.internal:5671",
+    "dest-exchange": "events",
+    "ack-mode": "on-confirm"}'
+```
+
+### Shovel account permissions
+
+The shovel service account needs minimal permissions:
+
+```bash
+# On source broker: read-only from source queue
+rabbitmqctl set_permissions -p production shovel-svc "" "" "^events$"
+
+# On destination broker: write-only to destination exchange
+rabbitmqctl set_permissions -p production shovel-svc "" "^events$" ""
+```
+
+## Securing Federation links
+
+```bash
+# Federation upstream with TLS
+rabbitmqctl set_parameter federation-upstream remote \
+  '{"uri": "amqps://federation-svc:pass@remote.internal:5671",
+    "prefetch-count": 100,
+    "reconnect-delay": 5}'
+```
+
+Requirements:
+- Mutual TLS between federated brokers (recommended)
+- Dedicated `federation-svc` account with read access on the upstream
+- Rate limiting via `prefetch-count` to prevent upstream flooding
+
+## Shovel credential rotation
+
+```bash
+# 1. Create new shovel user on remote
+rabbitmqctl add_user shovel-svc-v2 "<new-pass>"
+rabbitmqctl set_permissions -p production shovel-svc-v2 "" "" "^events$"
+
+# 2. Update shovel parameter with new credentials
+rabbitmqctl set_parameter shovel dc-link '{...new URI with new credentials...}'
+
+# Shovel reconnects automatically with new credentials
+
+# 3. Remove old user
+rabbitmqctl delete_user shovel-svc
+```
+
+## AceMQ Take
+
+- Never embed Shovel/Federation credentials in source code or version control. Use environment variable substitution or dynamic secret injection.
+- Set `ack-mode: on-confirm` on Shovels. The default `no-ack` mode risks message loss if the Shovel process restarts.
+- Audit Shovel and Federation links quarterly. Orphaned links from decommissioned clusters are a security and resource risk.

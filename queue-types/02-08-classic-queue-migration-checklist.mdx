@@ -1,0 +1,101 @@
+---
+title: Classic Queue Migration Checklist
+section: 02 — Queue Types
+layer: L3
+audience: [sre, developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Classic Queue Migration Checklist
+
+Migrating classic mirrored queues to quorum queues is required before upgrading to RabbitMQ 4.0. Classic mirrored queues are removed in 4.0.
+
+## Pre-migration audit
+
+```bash
+# Find all queues with HA policies
+rabbitmqctl list_queues name durable policy --formatter pretty_table \
+  | grep -i ha
+
+# List all policies
+rabbitmqctl list_policies --formatter pretty_table
+
+# Find queues with x-ha-policy x-argument
+rabbitmqctl list_queues name arguments --formatter pretty_table
+```
+
+## Migration steps
+
+### Option A: Blue/green (recommended for zero downtime)
+
+1. Create new quorum queue alongside old classic queue
+2. Update publishers to publish to both (or use a fanout exchange)
+3. Drain the old queue
+4. Update consumers to read from new queue
+5. Remove old queue
+
+### Option B: Direct migration (downtime window)
+
+1. Drain existing classic queue (let consumers catch up)
+2. Delete the classic queue
+3. Redeclare as quorum queue with same name
+4. Resume publishers and consumers
+
+## Application code changes
+
+```python
+# Before (classic mirrored — broken in 4.x)
+channel.queue_declare(
+    queue="orders",
+    durable=True,
+    arguments={"x-ha-policy": "all"}  # Remove this
+)
+
+# After (quorum queue)
+channel.queue_declare(
+    queue="orders",
+    durable=True,
+    arguments={"x-queue-type": "quorum"}  # Add this
+)
+```
+
+## Policy migration
+
+```bash
+# Remove old HA policy
+rabbitmqctl clear_policy ha-all
+
+# Add quorum replication policy
+rabbitmqctl set_policy quorum-ha ".*" \
+  '{"quorum-initial-group-size": 3}' \
+  --apply-to quorum-queues
+
+# Add delivery limit
+rabbitmqctl set_policy delivery-limit ".*" \
+  '{"delivery-limit": 3}' \
+  --apply-to quorum-queues
+```
+
+## Incompatibilities to resolve
+
+| Classic feature | Quorum equivalent |
+|---|---|
+| `x-ha-policy: all` | `x-queue-type: quorum` + group size policy |
+| `x-max-priority` | Application-level priority (separate queues) |
+| `basic.get` polling | Subscribe via `basic.consume` |
+| Auto-ack consumers | Manual ack (mandatory with quorum queues) |
+
+## Post-migration validation
+
+```bash
+# Verify quorum status
+rabbitmq-queues quorum_status orders
+
+# Verify no classic mirrored queues remain
+rabbitmqctl list_queues name type --formatter pretty_table | grep mirror
+```
+
+## Related pages
+- [Upgrade Strategy](/upgrades/10-01-upgrade-strategy)
+- [Classic to Quorum Migration](/upgrades/10-03-classic-to-quorum-migration)

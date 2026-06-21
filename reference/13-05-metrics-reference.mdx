@@ -1,0 +1,107 @@
+---
+title: Metrics Reference
+section: 13 — Reference
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Metrics Reference
+
+## Core metrics (always scrape)
+
+### Queue metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `rabbitmq_queue_messages_ready` | gauge | queue, vhost | Messages waiting for consumers |
+| `rabbitmq_queue_messages_unacked` | gauge | queue, vhost | Messages delivered, not yet acked |
+| `rabbitmq_queue_messages` | gauge | queue, vhost | Total messages in queue |
+| `rabbitmq_queue_consumers` | gauge | queue, vhost | Active consumer count |
+| `rabbitmq_queue_consumer_utilisation` | gauge | queue, vhost | Consumer utilization (0–1) |
+| `rabbitmq_queue_messages_published_total` | counter | queue, vhost | Total messages published |
+| `rabbitmq_queue_messages_delivered_total` | counter | queue, vhost | Total messages delivered |
+| `rabbitmq_queue_messages_redelivered_total` | counter | queue, vhost | Total redelivered messages |
+| `rabbitmq_queue_messages_acked_total` | counter | queue, vhost | Total acked messages |
+
+### Node metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `rabbitmq_process_resident_memory_bytes` | gauge | node | Node resident memory |
+| `rabbitmq_resident_memory_limit_bytes` | gauge | node | Memory watermark |
+| `rabbitmq_disk_space_available_bytes` | gauge | node | Free disk space |
+| `rabbitmq_erlang_processes_used` | gauge | node | Erlang processes in use |
+| `rabbitmq_erlang_processes_limit` | gauge | node | Erlang process limit |
+| `rabbitmq_connections` | gauge | node | Active connections |
+| `rabbitmq_channels` | gauge | node | Active channels |
+| `rabbitmq_alarms_memory_used_watermark` | gauge | node | Memory alarm (0/1) |
+| `rabbitmq_alarms_free_disk_space_watermark` | gauge | node | Disk alarm (0/1) |
+
+### Raft / Quorum queue metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `rabbitmq_ra_log_wal_write_duration_seconds` | histogram | node | WAL write latency |
+| `rabbitmq_quorum_queue_raft_term_total` | counter | queue, vhost | Raft term changes |
+| `rabbitmq_quorum_queue_raft_log_commit_latency_seconds` | histogram | queue, vhost | Commit latency |
+
+## Key PromQL queries
+
+```promql
+# Memory used fraction of watermark
+rabbitmq_process_resident_memory_bytes / rabbitmq_resident_memory_limit_bytes
+
+# WAL write p99
+histogram_quantile(0.99, rate(rabbitmq_ra_log_wal_write_duration_seconds_bucket[5m]))
+
+# Queue depth rate of change
+rate(rabbitmq_queue_messages_ready[5m])
+
+# Queues with no consumers
+rabbitmq_queue_consumers == 0 and rabbitmq_queue_messages_ready > 0
+
+# Consumer utilization
+rabbitmq_queue_consumer_utilisation
+
+# Raft leadership instability
+rate(rabbitmq_quorum_queue_raft_term_total[5m]) > 0.1
+```
+
+## Prometheus alert templates
+
+```yaml
+groups:
+- name: rabbitmq
+  rules:
+  - alert: MemoryAlarm
+    expr: rabbitmq_alarms_memory_used_watermark == 1
+    for: 1m
+    labels:
+      severity: critical
+
+  - alert: DiskAlarm
+    expr: rabbitmq_alarms_free_disk_space_watermark == 1
+    for: 1m
+    labels:
+      severity: critical
+
+  - alert: QueueDepthHigh
+    expr: rabbitmq_queue_messages_ready > 100000
+    for: 5m
+    labels:
+      severity: warning
+
+  - alert: NoConsumers
+    expr: rabbitmq_queue_consumers == 0 and rabbitmq_queue_messages_ready > 0
+    for: 2m
+    labels:
+      severity: critical
+
+  - alert: WalLatencyHigh
+    expr: histogram_quantile(0.99, rate(rabbitmq_ra_log_wal_write_duration_seconds_bucket[5m])) > 0.01
+    for: 10m
+    labels:
+      severity: critical
+```

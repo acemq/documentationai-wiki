@@ -1,0 +1,49 @@
+---
+title: Classic Queue Retention
+section: 02 — Queue Types
+layer: L2
+audience: [developer, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Classic Queue Retention
+
+🐇 **Upstream reference:** [Classic Queues](https://www.rabbitmq.com/docs/classic-queues)
+
+## What changed in 4.x
+
+In RabbitMQ 4.0, classic queues are **always in lazy mode** — messages are stored to disk immediately regardless of queue depth. The `x-queue-mode: lazy` argument is a no-op.
+
+Classic **mirrored** queues (`x-ha-policy`) were **removed in 4.0**. If you have existing mirrored queue policies, they have no effect after upgrading to 4.0.
+
+## When to use classic queues in 4.x
+
+| Use case | Appropriate? |
+|---|---|
+| Transient reply-to queues (RPC pattern) | Yes — use classic, auto-delete |
+| Priority queues (need `x-max-priority`) | Yes — only classic supports priorities |
+| Single-node development environment | Yes |
+| Durable HA workloads | **No — use quorum queues** |
+
+## Retention controls
+
+```bash
+# Message TTL via policy (milliseconds)
+rabbitmqctl set_policy msg-ttl "^classic\." \
+  '{"message-ttl": 86400000}' --apply-to queues
+
+# Queue TTL (auto-delete after inactivity)
+rabbitmqctl set_policy queue-ttl "^rpc\.reply\." \
+  '{"expires": 300000}' --apply-to queues
+
+# Max length
+rabbitmqctl set_policy max-len "^bounded\." \
+  '{"max-length": 100000}' --apply-to queues
+```
+
+## AceMQ Take
+
+- If you are still on classic queues for HA workloads, see [Classic Queue Migration Checklist](/queue-types/02-08-classic-queue-migration-checklist).
+- Priority queues remain valid for workloads that genuinely need priority scheduling — just don't expect HA from them.
+- The `x-queue-mode: lazy` argument is harmless but unnecessary in 4.x.

@@ -1,0 +1,70 @@
+---
+title: Quorum Queues Overview
+section: 01 — Core Concepts
+layer: L3
+audience: [developer, architect, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Quorum Queues Overview
+
+## What is a quorum queue?
+
+A quorum queue is a replicated durable queue backed by the Raft consensus algorithm. It is the **default queue type for durable workloads** in RabbitMQ 4.x.
+
+| Property | Value |
+|---|---|
+| Algorithm | Raft |
+| Default replicas | 3 (configurable via policy) |
+| Persistence | Always durable; always persistent messages |
+| Classic mirrored queues | Deprecated 3.12, **removed 4.0** |
+
+## Declaring a quorum queue
+
+```python
+channel.queue_declare(
+    queue="orders",
+    durable=True,
+    arguments={"x-queue-type": "quorum"}
+)
+```
+
+The `x-queue-type: quorum` argument is set **at declaration time** and cannot be changed without deleting and re-declaring the queue.
+
+## Raft replication
+
+Each quorum queue has one **leader** replica and `N-1` **follower** replicas:
+
+- Publishers and consumers always connect to the leader.
+- The leader replicates writes to a quorum (majority) of followers via the Raft log.
+- A message is confirmed (ack sent to publisher) only after a majority of replicas have written it.
+- If the leader fails, the remaining replicas elect a new leader automatically.
+
+## Quorum requirements
+
+| Replicas | Failures tolerated |
+|---|---|
+| 1 | 0 |
+| 3 | 1 |
+| 5 | 2 |
+
+A 3-node cluster with 3 replicas tolerates 1 node failure. A 5-node cluster with 5 replicas tolerates 2.
+
+## Poison message handling
+
+Quorum queues have a built-in delivery limit (`x-delivery-limit` / `delivery-limit` policy key). A message that is nack'd and requeued more than this limit is dead-lettered.
+
+**AceMQ recommendation:** Set `delivery-limit: 3` for most workloads. For high-TPS flows, keep it in the 3–5 range.
+
+## What quorum queues do NOT support
+
+- `x-message-ttl` at queue level (use policies)
+- `x-max-priority` (no priority support)
+- `basic.get` (polling) — use consumer subscriptions
+- Non-persistent messages (all messages are stored to disk)
+
+## Related pages
+- [Queue Type Decision Guide](/queue-types/02-01-queue-type-decision)
+- [Quorum Queue Best Practices](/queue-types/02-02-quorum-queue-best-practices)
+- [Delivery Guarantees](/core-concepts/01-04-delivery-guarantees)

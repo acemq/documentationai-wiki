@@ -1,0 +1,99 @@
+---
+title: Docker Compose
+section: 04 — Deployment
+layer: L3
+audience: [developer, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Docker Compose
+
+## Single-node development setup
+
+```yaml
+# docker-compose.yml
+version: "3.8"
+services:
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD}"
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  rabbitmq_data:
+```
+
+## Minimal rabbitmq.conf for dev
+
+```ini
+# rabbitmq.conf
+vm_memory_high_watermark.absolute = 512MB
+log.console.level = info
+```
+
+## Three-node cluster with Compose
+
+```yaml
+version: "3.8"
+services:
+  rabbitmq1:
+    image: rabbitmq:4.1-management
+    hostname: rabbitmq1
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "dev-cookie-abc123"
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
+    volumes:
+      - ./cluster.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+
+  rabbitmq2:
+    image: rabbitmq:4.1-management
+    hostname: rabbitmq2
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "dev-cookie-abc123"
+    depends_on: [rabbitmq1]
+    volumes:
+      - ./cluster.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+
+  rabbitmq3:
+    image: rabbitmq:4.1-management
+    hostname: rabbitmq3
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "dev-cookie-abc123"
+    depends_on: [rabbitmq1]
+    volumes:
+      - ./cluster.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+```
+
+```ini
+# cluster.conf
+cluster_formation.peer_discovery_backend = classic_config
+cluster_formation.classic_config.nodes.1 = rabbit@rabbitmq1
+cluster_formation.classic_config.nodes.2 = rabbit@rabbitmq2
+cluster_formation.classic_config.nodes.3 = rabbit@rabbitmq3
+```
+
+## AceMQ Take
+
+- Never use `RABBITMQ_DEFAULT_PASS` with a hardcoded password in production images. Use secrets management.
+- In Docker, always set `vm_memory_high_watermark.absolute` — the relative mode reads cgroup limits incorrectly in older Docker versions.
+- The management UI at `localhost:15672` is sufficient for dev; never expose it on a public interface.

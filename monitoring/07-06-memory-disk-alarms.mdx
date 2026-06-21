@@ -1,0 +1,79 @@
+---
+title: Memory & Disk Alarms
+section: 07 — Monitoring
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Memory & Disk Alarms
+
+## Memory alarm
+
+When memory usage exceeds `vm_memory_high_watermark`, RabbitMQ triggers a **memory alarm**:
+- All publishers are **flow-controlled** (AMQP blocked)
+- The `rabbitmq_alarms_memory_used_watermark` metric becomes 1
+- The management UI shows a red banner
+
+```bash
+# Check alarm state
+rabbitmqctl list_alarms
+
+# Check memory breakdown
+rabbitmq-diagnostics memory_breakdown
+```
+
+## Memory paging
+
+Before the alarm, RabbitMQ pages messages to disk when memory crosses the **paging ratio** (default: 50% of watermark):
+
+```ini
+# rabbitmq.conf
+vm_memory_high_watermark.relative = 0.4
+vm_memory_high_watermark_paging_ratio = 0.75  # page at 75% of watermark
+```
+
+## Container trap: absolute vs relative
+
+**In containers:** `vm_memory_high_watermark.relative` reads `/proc/meminfo` which reports **host RAM**, not container limit.
+
+| Setup | /proc/meminfo | Container limit | Watermark |
+|---|---|---|---|
+| Host: 128 GB, Container: 4 GB | 128 GB | 4 GB | 128 × 0.4 = 51 GB (!!) |
+
+The watermark is set to 51 GB but the container only has 4 GB — the alarm never triggers before OOM kill.
+
+**Fix:** Always use absolute mode in containers:
+
+```ini
+# rabbitmq.conf (in container with 4 GB limit)
+vm_memory_high_watermark.absolute = 3GB
+```
+
+## Disk alarm
+
+When disk space falls below `disk_free_limit`, RabbitMQ triggers a **disk alarm**:
+- All publishers are flow-controlled
+- Messages cannot be persisted
+
+```ini
+# rabbitmq.conf
+disk_free_limit.relative = 1.5  # 150% of installed RAM
+# or
+# disk_free_limit.absolute = 10GB
+```
+
+```bash
+# Check disk alarm
+rabbitmqctl list_alarms
+
+# Check disk space
+rabbitmq-diagnostics node_health_check
+```
+
+## AceMQ Take
+
+- The container/relative watermark trap has caused production OOM kills at multiple organizations. Always use `vm_memory_high_watermark.absolute` in any containerized deployment.
+- Alert at 70% of the memory watermark — before paging starts. Paging degrades throughput significantly.
+- Set `disk_free_limit.absolute = 10GB` as a floor. A relative limit that's 150% of RAM can be too large on nodes with 128+ GB RAM.

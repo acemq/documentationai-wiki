@@ -1,0 +1,62 @@
+---
+title: Raft Consensus Primer
+section: 01 — Core Concepts
+layer: L3
+audience: [architect, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Raft Consensus Primer
+
+## Why Raft matters for RabbitMQ operators
+
+In RabbitMQ 4.x, Raft underlies **three** components:
+
+1. **Quorum queues** — message replication
+2. **Khepri** — cluster metadata store (replacing Mnesia)
+3. **Streams** — stream coordinator
+
+Understanding Raft helps you size clusters, tune failure recovery, and avoid capacity traps.
+
+## How Raft works (essential version)
+
+1. One node is elected **leader**. All writes go through the leader.
+2. The leader appends entries to its **WAL** (write-ahead log) and sends them to followers.
+3. A write is **committed** when a **majority** (quorum) of nodes have written it.
+4. The leader sends a confirmation (publisher ack) only after commit.
+5. If the leader fails, the remaining nodes hold an election. The node with the most up-to-date log wins.
+
+## The majority requirement
+
+Raft requires a live majority to make progress:
+
+| Cluster size | Majority needed | Failures tolerated |
+|---|---|---|
+| 1 | 1 | 0 |
+| 3 | 2 | 1 |
+| 5 | 3 | 2 |
+| 7 | 4 | 3 |
+
+**Even-numbered clusters are a trap.** A 4-node cluster tolerates only 1 failure — same as 3 nodes but more overhead. Use odd-numbered clusters.
+
+## WAL and disk I/O
+
+Raft performance is bounded by disk write latency. The WAL must be `fdatasync`'d before a message can be confirmed.
+
+- **Target:** WAL `fdatasync` p99 < 10ms
+- **Measure:** `rabbitmq_ra_log_wal_write_duration_seconds` in Prometheus
+- **If slow:** Move WAL to NVMe SSD. Never use network-attached storage (NAS/NFS) for WAL.
+
+## Leader elections and availability
+
+During an election, the queue is **temporarily unavailable** for writes:
+- Publisher confirms will be delayed or negatively acknowledged
+- Consumer deliveries are paused until a new leader is elected
+- Elections typically complete in 2–10 seconds depending on `net_ticktime` and cluster load
+
+## AceMQ Take
+
+- Size quorum queue replica counts to match your fault tolerance target, not your cluster size. A 5-node cluster can host queues with 3 replicas (tolerates 2 failures for that queue) or 5 replicas (tolerates 2 node failures overall).
+- Monitor `rabbitmq_ra_log_wal_write_duration_seconds` as a first-class SLI.
+- Never deploy a 2-node cluster for replicated queues. It provides no failure tolerance.

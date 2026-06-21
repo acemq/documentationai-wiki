@@ -1,0 +1,79 @@
+---
+title: Dashboard Tour
+section: 07 — Monitoring
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Dashboard Tour
+
+## Management UI overview
+
+The management UI at `https://rabbitmq:15671` provides:
+
+### Overview tab
+- Global message rates (publish, deliver, ack)
+- Active connections and channels
+- Node memory and disk status
+- Cluster nodes and their states
+
+### Connections tab
+- Active connections with user, vHost, state, and rate
+- Use to spot connection churn or zombie connections
+
+### Channels tab
+- Active channels with prefetch, unacked count, rate
+- High unacked counts indicate consumer backlog
+
+### Queues tab
+- Queue depth (ready + unacked)
+- Consumer count and utilization
+- Incoming and outgoing rates
+- Filter by vHost or name pattern
+
+### Admin tab
+- User management
+- vHost management
+- Policy management
+- Tracing
+
+## Critical dashboard views
+
+### Identifying a consumer lag
+
+1. Queues tab → sort by "Messages" descending
+2. Click the growing queue
+3. Check: Consumer utilisation (> 0.9 = consumers are saturated)
+4. Check: Incoming rate > delivery rate (consuming slower than producing)
+5. Add consumers or increase prefetch
+
+### Identifying a memory pressure situation
+
+1. Overview tab → Nodes section
+2. Look for node with memory bar > 50%
+3. Click node → Memory breakdown
+4. Check "Binaries" and "Queue process" categories
+
+### Identifying a connection issue
+
+1. Connections tab → check state ("blocked" = flow control active)
+2. Channels tab → look for channels with `consumer_capacity = 0`
+
+## Prometheus / Grafana panels for oncall
+
+For the oncall dashboard, include these panels in priority order:
+
+1. Memory alarm state (red/green)
+2. Disk alarm state (red/green)
+3. Queue depth for all critical queues
+4. Consumer count per critical queue (green/red on 0)
+5. WAL write latency p99
+6. Publish and delivery rate (historical)
+
+## AceMQ Take
+
+- Bookmark the management UI Queues tab sorted by depth descending. This is your first stop during any incident.
+- The Grafana dashboard is better for oncall (trend visibility); the management UI is better for real-time debugging.
+- Add a bookmark for `https://rabbitmq:15671/#/queues` (direct link to queues tab) in your browser and runbook.

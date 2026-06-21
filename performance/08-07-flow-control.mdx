@@ -1,0 +1,89 @@
+---
+title: Flow Control
+section: 08 — Performance
+layer: L3
+audience: [sre, developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Flow Control
+
+## How flow control works
+
+RabbitMQ uses credit-based flow control at the channel level. Each process (connection, channel, queue) has a credit count. When credits are exhausted, the upstream process is blocked.
+
+**Triggers for flow control:**
+- Memory usage > watermark → all publishers blocked cluster-wide
+- Disk space < `disk_free_limit` → all publishers blocked
+- Queue credit exhausted → producer-to-queue path throttled
+- Internal memory per-process > threshold → channel throttled
+
+## Detecting flow control
+
+```bash
+# Check connection state (blocked = flow controlled)
+rabbitmqctl list_connections name state --formatter pretty_table
+# state will show "blocked" or "blocking"
+
+# Check channel state
+rabbitmqctl list_channels name connection flow --formatter pretty_table
+
+# Prometheus alert
+rabbitmq_connection_channels_total > 0 and rabbitmq_connections > 0
+# and check connection state via management API
+```
+
+## AMQP connection.blocked notification
+
+```python
+import pika
+
+def on_blocked(connection, reason):
+    print(f"Connection blocked: {reason}")
+    # Stop publishing, wait for on_unblocked
+
+def on_unblocked(connection):
+    print("Connection unblocked, resuming")
+    # Resume publishing
+
+params = pika.ConnectionParameters(
+    host="rabbitmq.internal",
+    blocked_connection_timeout=300
+)
+
+conn = pika.BlockingConnection(params)
+conn.add_on_connection_blocked_callback(on_blocked)
+conn.add_on_connection_unblocked_callback(on_unblocked)
+```
+
+## Handling flow control in producers
+
+```python
+class FlowAwarePublisher:
+    def __init__(self, channel):
+        self.channel = channel
+        self.blocked = False
+
+    def publish(self, exchange, routing_key, body):
+        if self.blocked:
+            raise FlowControlException("Broker is blocking publishers")
+        try:
+            self.channel.basic_publish(exchange, routing_key, body)
+        except Exception:
+            raise
+
+    def on_blocked(self, frame):
+        self.blocked = True
+        logger.warning("Flow control activated")
+
+    def on_unblocked(self, frame):
+        self.blocked = False
+        logger.info("Flow control released")
+```
+
+## AceMQ Take
+
+- Flow control is a symptom of a root cause: memory pressure, disk shortage, or consumer lag. Address the root cause, not the flow control itself.
+- Applications should handle `connection.blocked` gracefully — back off and stop publishing. Not handling it causes connection timeouts and broken publish loops.
+- Flow control blocking all publishers is often first noticed by application timeouts, not alerts. Add `connection.blocked` monitoring to your observability stack.

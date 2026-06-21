@@ -1,0 +1,76 @@
+---
+title: Alerting Runbook
+section: 07 — Monitoring
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Alerting Runbook
+
+## Alert: Memory alarm active
+
+**Trigger:** `rabbitmq_alarms_memory_used_watermark == 1`
+
+**Impact:** All publishers are blocked. No messages are accepted.
+
+**Immediate actions:**
+1. Check which node has the alarm: `rabbitmqctl list_alarms`
+2. Check memory usage: `rabbitmq-diagnostics memory_breakdown`
+3. Identify consumers that are lagging (queue depth growing)
+4. Temporarily increase watermark: `rabbitmqctl set_vm_memory_high_watermark 0.6`
+5. Force page to disk: `rabbitmqctl set_vm_memory_high_watermark_paging_ratio 0.5`
+
+See [Memory Alarms](/troubleshooting/12-01-memory-alarms) for root cause analysis.
+
+## Alert: Queue depth growing
+
+**Trigger:** `rate(rabbitmq_queue_messages_ready[10m]) > 0` and `rabbitmq_queue_messages_ready > SLO_threshold`
+
+**Impact:** Consumer lag, potential message expiry, SLA breach.
+
+**Immediate actions:**
+1. Check consumer count: `rabbitmqctl list_queues name consumers`
+2. Check consumer utilization: look at `rabbitmq_queue_consumer_utilisation` in Grafana
+3. Add consumer instances if utilization > 0.8
+4. Check for consumer errors: `rabbitmqctl list_queues name messages_unacknowledged`
+
+## Alert: No consumers
+
+**Trigger:** `rabbitmq_queue_consumers{queue="critical-queue"} == 0` for > 60s
+
+**Impact:** Messages accumulate; processing stops entirely.
+
+**Immediate actions:**
+1. Check consumer service health
+2. Check AMQP connection errors in logs
+3. Verify consumer service has correct RabbitMQ credentials
+4. Restart consumer service if unhealthy
+
+## Alert: WAL latency elevated
+
+**Trigger:** WAL p99 > 10ms for > 5 minutes
+
+**Impact:** Publisher confirms slow. Quorum queue throughput degraded.
+
+**Immediate actions:**
+1. Check disk I/O: `iostat -x 1 10` on the affected node
+2. Check for disk-intensive workloads co-located with RabbitMQ
+3. Check WAL directory disk usage: `du -sh /var/lib/rabbitmq/mnesia/*/quorum/`
+
+## Alert: Raft term increasing rapidly
+
+**Trigger:** Rate of `rabbitmq_quorum_queue_raft_term_total` > 5/min
+
+**Impact:** Repeated leader elections; publish confirms delayed.
+
+**Immediate actions:**
+1. Check cluster connectivity: `rabbitmqctl cluster_status`
+2. Check for network packet loss between nodes
+3. Check node CPU: high CPU can delay Raft heartbeats
+
+## AceMQ Take
+
+- Page immediately on memory alarms and queue depth SLO breaches. These have customer-facing impact.
+- Alert on trends (rate of change), not just absolute values. A queue at 1M messages but stable is less urgent than a queue at 100k growing at 10k/min.

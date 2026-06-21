@@ -1,0 +1,88 @@
+---
+title: Multi-DC Architecture
+section: 11 — HA & DR
+layer: L3
+audience: [architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Multi-DC Architecture
+
+## Options for multi-datacenter RabbitMQ
+
+| Option | Latency sensitivity | Consistency | Complexity |
+|---|---|---|---|
+| Stretched cluster (1 cluster, 2 DCs) | High (< 5ms between DCs) | Strong | Medium |
+| Shovel (message forwarding) | Tolerant | Eventual | Low |
+| Federation (pull-based) | Tolerant | Eventual | Low |
+| Separate clusters + active-active | N/A (app-level) | Application-defined | High |
+
+## Stretched cluster (not recommended)
+
+A single RabbitMQ cluster across two datacenters is only viable when:
+- Network RTT between DCs is consistently < 5ms
+- Raft heartbeats can reliably traverse the WAN link
+- A tiebreaker (arbiter node or 3rd DC) is available
+
+With higher latency or unreliable links, Raft leader elections become frequent and throughput degrades.
+
+## Recommended: separate clusters per DC with Shovel
+
+```
+DC-West                          DC-East
++------------------+             +------------------+
+| RabbitMQ Cluster |  Shovel     | RabbitMQ Cluster |
+| (3 nodes)        | ==========> | (3 nodes)        |
++------------------+             +------------------+
+       |                                 |
+  Publishers                       Consumers
+  (West apps)                      (East apps)
+```
+
+```bash
+# Configure Shovel on DC-East to consume from DC-West
+rabbitmqctl set_parameter shovel west-to-east \
+  '{"src-protocol": "amqp091",
+    "src-uri": "amqps://shovel:pass@dc-west.internal:5671",
+    "src-queue": "events",
+    "dest-protocol": "amqp091",
+    "dest-uri": "amqp://localhost",
+    "dest-exchange": "events",
+    "ack-mode": "on-confirm"}'
+```
+
+## Active-active multi-DC
+
+For bidirectional replication:
+
+```
+DC-West ⇔ Shovel ⇔ DC-East
+```
+
+Both DCs publish and consume. Messages are forwarded bidirectionally. Key challenge: preventing feedback loops. Use a `x-death` header check or a cluster-specific queue naming convention to prevent messages from circling.
+
+## Failover procedure (Shovel setup)
+
+```bash
+# DC-West fails
+# 1. Redirect publishers to DC-East
+#    (update DNS, load balancer weights, or application config)
+
+# 2. Reconfigure Shovel direction (DC-East now primary)
+#    Or temporarily disable Shovel until DC-West recovers
+rabbitmqctl delete_parameter shovel west-to-east
+
+# 3. Monitor DC-East queue depths
+# DC-East now handles all traffic
+
+# DC-West recovers:
+# 4. Replay messages from DC-East back to DC-West via Shovel
+# 5. Restore normal Shovel direction
+```
+
+## AceMQ Take
+
+- Avoid stretched clusters across high-latency WAN links. The Raft consensus performance degradation under high latency is significant and hard to predict.
+- The Shovel pattern is operationally simpler and more predictable than stretched clusters. Trade-off: messages in transit (in the Shovel pipe) may be lost during failover.
+- For compliance requirements around data residency, separate clusters per DC with careful message routing is the only viable option.

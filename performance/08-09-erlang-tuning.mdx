@@ -1,0 +1,88 @@
+---
+title: Erlang VM Tuning
+section: 08 — Performance
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Erlang VM Tuning
+
+## Scheduler configuration
+
+Erlang schedulers map to CPU cores. RabbitMQ automatically detects and uses all cores:
+
+```bash
+# Check current scheduler count
+rabbitmqctl eval 'erlang:system_info(schedulers).'
+
+# Check scheduler utilization
+rabbitmqctl eval 'scheduler:utilization(5000).'
+```
+
+Pinning schedulers to CPU cores (NUMA systems):
+
+```bash
+# rabbitmq-env.conf
+SERVER_ERL_ARGS="+S 8:8 +stbt tnnps"
+# +S Schedulers:DirtySchedulers
+# +stbt tnnps: scheduler bind type
+```
+
+## Process limits
+
+```bash
+# rabbitmq-env.conf
+SERVER_ERL_ARGS="+P 2097152"  # max Erlang processes (default: 1048576)
+```
+
+Each RabbitMQ entity (connection, channel, queue, consumer, Raft peer) is an Erlang process.
+
+## GC tuning
+
+```bash
+# Reduce GC pause frequency for large heap sizes
+# rabbitmq-env.conf
+SERVER_ERL_ARGS="+h 16384"  # minimum heap size per process
+```
+
+For high-throughput brokers, the default GC is usually adequate. Aggressive GC tuning can cause latency spikes.
+
+## I/O thread pool
+
+RabbitMQ uses async I/O threads for disk operations:
+
+```bash
+# rabbitmq-env.conf (default: max(8, schedulers))
+SERVER_ERL_ARGS="+A 128"  # async I/O threads
+```
+
+Increase if `rabbitmq_io_write_ops_total` rate is high but CPU isn't saturated.
+
+## Kernel polling
+
+```bash
+# rabbitmq-env.conf
+# Kernel poll is enabled by default in modern Erlang. Verify:
+rabbitmqctl eval 'erlang:system_info(kernel_poll).'
+# Should return 'true'
+```
+
+## Verify current settings
+
+```bash
+# Check all Erlang system info
+rabbitmq-diagnostics erlang_version
+rabbitmq-diagnostics runtime_parameters
+
+# Full Erlang system_info
+rabbitmqctl eval 'erlang:system_info(schedulers_online).'
+rabbitmqctl eval 'erlang:system_info(otp_release).'
+```
+
+## AceMQ Take
+
+- Don't tune the Erlang VM without a measured bottleneck. The defaults are good for most workloads.
+- Increase the async I/O thread pool (`+A`) if you have many quorum queues and disk I/O is a bottleneck but CPU is not.
+- Process limit increases (`+P`) are safe and should be done proactively if you expect > 500k concurrent entities.

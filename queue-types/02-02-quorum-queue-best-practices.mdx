@@ -1,0 +1,84 @@
+---
+title: Quorum Queue Best Practices
+section: 02 — Queue Types
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Quorum Queue Best Practices
+
+## Replica count
+
+Set replica count via policy, not per-queue arguments:
+
+```bash
+rabbitmqctl set_policy quorum-replication "^quorum\." \
+  '{"quorum-initial-group-size": 3}' \
+  --apply-to queues --priority 10
+```
+
+| Cluster size | Recommended replicas | Failures tolerated |
+|---|---|---|
+| 3 nodes | 3 | 1 |
+| 5 nodes | 3 or 5 | 1 or 2 |
+| 7 nodes | 5 | 2 |
+
+Using 5 replicas in a 5-node cluster means **any 2 nodes can fail** and the queue stays available.
+
+## Delivery limit (mandatory)
+
+Always set `delivery-limit` to prevent poison message loops:
+
+```bash
+rabbitmqctl set_policy delivery-limit ".*" \
+  '{"delivery-limit": 3}' \
+  --apply-to quorum-queues
+```
+
+With `delivery-limit: 3`, a message nack'd 3 times goes to the DLX (if configured) or is discarded.
+
+## WAL management
+
+The Raft WAL is the write-ahead log for quorum queues. It must be on fast local storage:
+
+```ini
+# rabbitmq.conf
+ra.wal_data_dir = /mnt/nvme/rabbitmq/wal
+```
+
+- Target: WAL write p99 < 10ms
+- Never use NFS/NAS for WAL — the latency kills throughput
+- WAL compaction runs automatically; monitor `rabbitmq_ra_log_wal_bytes` for growth
+
+## Leader balancing
+
+After node restarts or rolling upgrades, quorum queue leaders can pile up on a single node:
+
+```bash
+# Rebalance leaders across all nodes
+rabbitmq-queues rebalance quorum
+```
+
+Run this after any rolling restart. Check balance with:
+
+```bash
+rabbitmqctl list_queues name leader members --formatter pretty_table
+```
+
+## Monitoring quorum health
+
+```bash
+# Check quorum status of a specific queue
+rabbitmq-queues quorum_status orders
+
+# Check if taking a node down would be quorum-critical
+rabbitmq-diagnostics check_if_node_is_quorum_critical
+```
+
+## AceMQ Take
+
+- `delivery-limit` is not optional. Set it on every quorum queue before production traffic arrives.
+- After any maintenance window, run `rabbitmq-queues rebalance quorum` to prevent leader hotspots.
+- Monitor `rabbitmq_quorum_queue_raft_term_total` — rapidly incrementing values indicate leadership instability.

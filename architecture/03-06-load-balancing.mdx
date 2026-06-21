@@ -1,0 +1,91 @@
+---
+title: Load Balancing
+section: 03 — Architecture
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Load Balancing
+
+## What load balancing does (and doesn't do) for RabbitMQ
+
+RabbitMQ is a **stateful** system. Quorum queues have a leader node, and publishers/consumers must reach that leader for quorum queue operations. A load balancer can distribute **new connections** across nodes, but it cannot route individual operations to the correct leader node — the RabbitMQ client does that automatically.
+
+## Layer 4 (TCP) load balancing
+
+The simplest approach: distribute AMQP connections across nodes at the TCP level.
+
+```nginx
+# nginx stream (TCP LB)
+stream {
+  upstream rabbitmq {
+    server node1:5671;
+    server node2:5671;
+    server node3:5671;
+  }
+  server {
+    listen 5671;
+    proxy_pass rabbitmq;
+  }
+}
+```
+
+**Pros:** Simple, works with any AMQP client, passes TLS through.
+**Cons:** Connections are not rebalanced when a node rejoins. Sticky sessions are not supported.
+
+## HAProxy configuration
+
+```
+frontend rabbitmq-amqp
+  bind *:5671 ssl crt /etc/haproxy/certs/combined.pem
+  mode tcp
+  default_backend rabbitmq-nodes
+
+backend rabbitmq-nodes
+  mode tcp
+  balance roundrobin
+  option tcp-check
+  server rabbit1 node1:5671 check inter 5s
+  server rabbit2 node2:5671 check inter 5s
+  server rabbit3 node3:5671 check inter 5s
+```
+
+## Client-side connection strategy
+
+For RabbitMQ clusters, configure your client with multiple addresses and let it handle failover:
+
+```python
+# pika (Python)
+parameters = [pika.ConnectionParameters(host) for host in [
+    "node1", "node2", "node3"
+]]
+connection = pika.BlockingConnection(parameters)
+```
+
+This allows the client to reconnect to any healthy node if the current connection drops.
+
+## Kubernetes load balancing
+
+In Kubernetes, use a standard `ClusterIP` Service for client connections — kube-proxy distributes connections across pods:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+  - name: amqp
+    port: 5671
+    targetPort: 5671
+```
+
+## AceMQ Take
+
+- Do not use a Layer 7 (HTTP) load balancer for AMQP — it doesn't understand the protocol and will break connections.
+- Configure client failover in the client library, not just in the load balancer. Load balancer health checks can lag behind actual node state.
+- For the management API (port 15672/15671), a standard HTTP load balancer is appropriate.

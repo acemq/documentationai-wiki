@@ -1,0 +1,53 @@
+---
+title: Performance Overview
+section: 08 — Performance
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Performance Overview
+
+## The three performance bottlenecks
+
+RabbitMQ performance is bounded by three resource ceilings in practice:
+
+1. **WAL I/O** — Raft log writes to disk. The most common bottleneck for quorum queues. fdatasync p99 > 10ms degrades confirm throughput.
+2. **CPU (Erlang scheduler)** — Message routing, encoding/decoding, Raft consensus. Multi-core helps; Erlang schedules across all cores.
+3. **Memory** — In-flight messages, binaries, connection state. Memory pressure triggers paging, then flow control.
+
+## Throughput benchmarks (reference)
+
+These are representative numbers on well-tuned hardware. Your workload will vary.
+
+| Scenario | Approximate throughput |
+|---|---|
+| Small messages (1 KB), 1 quorum queue, confirms | 20–50k msg/s per node |
+| Small messages, 10 queues, confirms | 100–300k msg/s cluster |
+| Large messages (100 KB), confirms | 500–2k msg/s (network-bound) |
+| Classic queues, no confirms | 200–500k msg/s |
+| Stream queues (sequential append) | 500k+ msg/s |
+
+## Latency targets
+
+| Metric | Target | Alert threshold |
+|---|---|---|
+| Publisher confirm round-trip | < 5ms p99 | > 20ms |
+| Consumer delivery latency | < 10ms p99 | > 50ms |
+| WAL fdatasync | < 5ms p99 | > 10ms |
+| Leader election time | < 5 seconds | > 10 seconds |
+
+## Performance testing process
+
+1. **Baseline** — Establish current throughput and latency with `rabbitmq-perf-test`
+2. **Bottleneck identification** — Check WAL latency, CPU, memory in Grafana
+3. **Single-variable change** — Change one setting at a time
+4. **Re-measure** — Compare against baseline
+5. **Document** — Record what changed and the measured effect
+
+## AceMQ Take
+
+- WAL I/O is the bottleneck in > 80% of performance investigations. Check it first with `rabbitmq_ra_log_wal_write_duration_seconds` before investigating anything else.
+- Over-tuning is a risk. Most production workloads perform well with defaults; tuning is for workloads that have measured a specific bottleneck.
+- Test with production-representative message sizes and patterns. Microbenchmarks with 1-byte messages are not predictive.

@@ -1,0 +1,86 @@
+---
+title: Consumer Ack & Prefetch
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Consumer Ack & Prefetch
+
+## Manual acknowledgement
+
+Always use manual ack in production:
+
+```python
+# Enable manual ack (auto_ack=False)
+channel.basic_consume(
+    queue="orders",
+    on_message_callback=process_order,
+    auto_ack=False
+)
+
+def process_order(ch, method, properties, body):
+    try:
+        handle(body)
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+    except ProcessingError:
+        # Requeue for retry
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+    except PoisonMessage:
+        # Send to DLX
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+```
+
+## Prefetch (QoS)
+
+Prefetch limits how many unacked messages the broker delivers to a consumer at once:
+
+```python
+# Set prefetch before subscribing
+channel.basic_qos(prefetch_count=10)
+channel.basic_consume(queue="orders", ...)
+```
+
+### Tuning prefetch
+
+| Consumer processing time | Recommended prefetch |
+|---|---|
+| < 1ms (fast) | 100–1000 |
+| 1–10ms | 20–100 |
+| 10–100ms | 5–20 |
+| > 100ms (slow) | 1–5 |
+
+**Prefetch = 1** means one message at a time: fair dispatch, lowest throughput. Use for long-running, exclusive processing.
+
+**High prefetch** means many messages in-flight per consumer: high throughput, but if the consumer crashes all in-flight messages requeue.
+
+## Bulk acknowledgement
+
+For high-throughput consumers, ack multiple messages at once:
+
+```python
+def process_batch(ch, method, properties, body):
+    messages.append((method.delivery_tag, body))
+    if len(messages) >= BATCH_SIZE:
+        process_all(messages)
+        # multiple=True acks all delivery tags up to and including this one
+        ch.basic_ack(delivery_tag=method.delivery_tag, multiple=True)
+        messages.clear()
+```
+
+## Consumer cancellation
+
+```python
+# Graceful shutdown: cancel consumer, drain pending acks, then close
+channel.basic_cancel(consumer_tag)
+# Process remaining in-flight messages...
+channel.close()
+```
+
+## AceMQ Take
+
+- Never use `auto_ack=True` in production. A crash between delivery and processing silently loses the message.
+- Start prefetch tuning at 20. Measure throughput and CPU. Increase until throughput plateaus, then back off 20%.
+- With `delivery-limit` set on quorum queues, a nack+requeue will eventually dead-letter the message. This is your poison message safety net.

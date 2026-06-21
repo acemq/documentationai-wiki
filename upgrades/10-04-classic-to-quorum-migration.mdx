@@ -1,0 +1,77 @@
+---
+title: Classic to Quorum Migration
+section: 10 — Upgrades
+layer: L3
+audience: [sre, developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Classic to Quorum Queue Migration
+
+## Why this migration is required
+
+Classic mirrored queues were deprecated in RabbitMQ 3.12 and **removed in 4.0**. Any cluster using mirrored queues cannot upgrade to 4.0 until migration is complete.
+
+Classic non-mirrored queues still work in 4.x but are single-node (no HA). Migrating them to quorum queues is recommended for durability.
+
+## Migration strategy options
+
+| Strategy | Downtime | Complexity | Message safety |
+|---|---|---|---|
+| Blue/green (separate cluster) | None | High | Highest |
+| Policy swap (in-place) | Brief | Medium | Good |
+| Application-side switch | None | Low (app change) | Highest |
+
+## Blue/green migration (recommended)
+
+```bash
+# Phase 1: Create quorum queues alongside classic queues
+# New queue name: orders.q (quorum) alongside orders (classic)
+
+# Phase 2: Switch publishers to write to both (dual-write period)
+# Ensures no messages lost during transition
+
+# Phase 3: Let classic queue drain (consumers read from both)
+# Monitor: queue depth of classic queue approaches 0
+
+# Phase 4: Switch all consumers to quorum queue only
+
+# Phase 5: Delete classic queue
+rabbitmqctl delete_queue orders
+```
+
+## Policy-based migration (lower risk than manual)
+
+```bash
+# Step 1: Remove HA (mirror) policy
+rabbitmqctl clear_policy ha-all
+
+# Step 2: Let queues drain or accept brief downtime
+# Consumers must handle redelivery
+
+# Step 3: Delete classic queues
+rabbitmqctl list_queues name type | grep classic | awk '{print $1}' | \
+  xargs -I{} rabbitmqctl delete_queue {}
+
+# Step 4: Declare quorum queues with same names
+# (Application restarts will redeclare with x-queue-type: quorum)
+```
+
+## Verifying no mirrored queues remain
+
+```bash
+# Check for HA policies
+rabbitmqctl list_policies | grep -E '(ha-mode|ha-sync)'
+
+# Check for any classic queues
+rabbitmqctl list_queues name type | grep classic
+
+# Should both return empty
+```
+
+## AceMQ Take
+
+- Audit for mirrored queues 4–8 weeks before your planned 4.0 upgrade. This gives time for the migration without rushing.
+- The application-side switch (add `x-queue-type: quorum` to queue declarations) is the cleanest approach if you control the code. It requires a delete + redeclare of existing queues, which means a drain first.
+- After migration to quorum queues, set `delivery-limit: 3` on all queues. This is mandatory for production quorum queue deployments.

@@ -1,0 +1,79 @@
+---
+title: Erlang Distribution
+section: 03 — Architecture
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Erlang Distribution
+
+## What is Erlang distribution?
+
+RabbitMQ uses Erlang's built-in distributed computing layer (OTP distribution) to communicate between cluster nodes. This is a TCP-based protocol distinct from AMQP.
+
+## Ports
+
+| Port | Purpose |
+|---|---|
+| `4369` | EPMD (Erlang Port Mapper Daemon) — node discovery |
+| `25672` | Erlang inter-node distribution (default range start) |
+| `35672–35682` | CLI tool communication range |
+
+All inter-node communication happens on port 25672 (configurable). EPMD on 4369 is required for node name resolution.
+
+## Configuring distribution
+
+```ini
+# rabbitmq.conf
+
+# Distribution port
+distribution.listener.port = 25672
+
+# Restrict distribution to specific interface
+distribution.listener.interface = 10.0.1.5
+
+# Use TLS for inter-node communication (recommended for production)
+ssl_dist_opt.server.certfile = /etc/rabbitmq/certs/server.crt
+ssl_dist_opt.server.keyfile  = /etc/rabbitmq/certs/server.key
+ssl_dist_opt.server.cacertfile = /etc/rabbitmq/certs/ca.crt
+```
+
+## Heartbeat (net_ticktime)
+
+`net_ticktime` controls how quickly a node detects peer failures:
+
+```ini
+# rabbitmq.conf
+kernel.net_ticktime = 10  # default: 60 seconds
+```
+
+| net_ticktime | Detection latency | False positive risk |
+|---|---|---|
+| 60s (default) | Up to 4×60s = 4 min | Low |
+| 10s | Up to 40s | Medium |
+| 5s | Up to 20s | Higher (LAN required) |
+
+A node is declared dead after `4 × net_ticktime` without a response. Lower values detect failures faster but increase false positives under network jitter.
+
+## Node names
+
+RabbitMQ node names follow the format `rabbit@<hostname>`:
+
+```bash
+# Check current node name
+rabbitmqctl status | grep "Node name"
+# Output: Node name: rabbit@node1
+
+# All cluster members must resolve each other's hostnames
+ping node2.internal
+```
+
+Hostname resolution must be consistent across all nodes. Use `/etc/hosts` or DNS; avoid relying on short hostnames.
+
+## AceMQ Take
+
+- Firewall rules must permit TCP on ports 4369 and 25672 between all cluster nodes.
+- On Kubernetes, the network policy must allow pod-to-pod traffic on these ports within the RabbitMQ namespace.
+- Enable TLS for inter-node distribution in any environment that crosses a network boundary (different racks, AZs, or DCs).

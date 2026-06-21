@@ -1,0 +1,109 @@
+---
+title: Message Size Optimization
+section: 08 — Performance
+layer: L3
+audience: [developer, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Message Size Optimization
+
+## Size impact on performance
+
+| Message size | Throughput | Memory impact | Notes |
+|---|---|---|---|
+| < 1 KB | Highest | Low | Ideal for most use cases |
+| 1–10 KB | Good | Medium | Common range |
+| 10–100 KB | Moderate | High | Consider chunking |
+| > 100 KB | Low | Very high | Use claim-check pattern |
+| > 1 MB | Poor | Extreme | Strongly avoid |
+
+## RabbitMQ hard limits
+
+```ini
+# Default max frame size (131072 bytes = 128 KB)
+# For large messages, increase:
+frame_max = 131072
+
+# Set max message size (no default limit, but advisable)
+max_message_size = 134217728  # 128 MB absolute max
+```
+
+## Compression
+
+For messages > 10 KB, compression typically reduces size 40–70%:
+
+```python
+import gzip
+import json
+
+def publish_compressed(channel, exchange, routing_key, payload):
+    body = gzip.compress(json.dumps(payload).encode())
+    props = pika.BasicProperties(
+        content_type="application/json",
+        content_encoding="gzip",
+        delivery_mode=2
+    )
+    channel.basic_publish(exchange, routing_key, body, props)
+
+def consume_compressed(body, properties):
+    if properties.content_encoding == "gzip":
+        body = gzip.decompress(body)
+    return json.loads(body)
+```
+
+## Claim-check pattern (large payloads)
+
+For messages > 100 KB, store the payload in object storage and pass a reference:
+
+```python
+import boto3
+import uuid
+
+def publish_with_claim_check(channel, payload):
+    key = str(uuid.uuid4())
+
+    # Store payload in S3
+    s3 = boto3.client('s3')
+    s3.put_object(Bucket="messages", Key=key, Body=json.dumps(payload).encode())
+
+    # Publish small reference
+    ref = {"store": "s3", "bucket": "messages", "key": key}
+    channel.basic_publish(
+        exchange="events",
+        routing_key="order.created",
+        body=json.dumps(ref).encode()
+    )
+
+def consume_with_claim_check(body):
+    ref = json.loads(body)
+    s3 = boto3.client('s3')
+    response = s3.get_object(Bucket=ref['bucket'], Key=ref['key'])
+    return json.loads(response['Body'].read())
+```
+
+## Batch encoding
+
+For many small messages, encode multiple records into one message:
+
+```python
+BATCH_SIZE = 100
+batch = []
+
+for event in events:
+    batch.append(event)
+    if len(batch) >= BATCH_SIZE:
+        channel.basic_publish(
+            exchange="events",
+            routing_key="orders.batch",
+            body=json.dumps(batch).encode()
+        )
+        batch = []
+```
+
+## AceMQ Take
+
+- Keep messages under 10 KB. This is the sweet spot for RabbitMQ — small enough for high throughput, large enough to carry meaningful context.
+- Use the claim-check pattern for anything over 1 MB. The overhead of large messages in the WAL and in-memory binaries outweighs the convenience.
+- Consider message compression for payloads > 10 KB that are compressible (JSON, XML, text). The CPU cost is usually less than the disk I/O savings.

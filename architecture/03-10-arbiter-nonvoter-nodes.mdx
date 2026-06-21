@@ -1,0 +1,56 @@
+---
+title: Arbiter & Non-voter Nodes
+section: 03 — Architecture
+layer: L3
+audience: [architect, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Arbiter & Non-voter Nodes
+
+## Why arbiter nodes exist
+
+Quorum queues require an odd number of replicas to function correctly. In a 4-node cluster, you cannot achieve 5-replica quorum without adding a 5th storage node — which may be expensive.
+
+An **arbiter node** participates in Raft elections (counts toward quorum) but stores no queue data. It is a lightweight node that "breaks ties" without the storage cost of a full node.
+
+## Configuring an arbiter
+
+In RabbitMQ, arbiter-like behavior is achieved via the non-voting member configuration:
+
+```bash
+# Set a node as a non-voter for a specific quorum queue
+rabbitmq-queues add_member --vhost / <queue-name> rabbit@arbiter-node --membership non-voter
+```
+
+Non-voter members:
+- Receive Raft log entries
+- Do NOT vote in leader elections
+- Do NOT count toward quorum
+- Useful as standbys that hold a copy of data without affecting availability calculations
+
+## When to use each
+
+| Pattern | Use |
+|---|---|
+| **True arbiter** (Raft voter, no data) | Achieve odd quorum with minimal resources |
+| **Non-voter** (Raft follower, no vote) | Read-replica / standby DR copy |
+| **Full member** (voter + data) | Standard quorum queue replica |
+
+## 4-node cluster with arbiter
+
+```
+Node A (voter, data)  ┐
+Node B (voter, data)  ├─ quorum queue: 3 replicas, 1 arbiter
+Node C (voter, data)  ┘
+Node D (arbiter only) ── vote only, no queue data
+```
+
+This gives a 4-node cluster with 3-replica quorum tolerance (1 data node failure) plus an arbiter for election tiebreaking.
+
+## AceMQ Take
+
+- Use arbiter nodes in cloud environments where adding a full storage node is cost-prohibitive, but you need to achieve an odd Raft quorum.
+- Non-voter nodes are useful for DR copies: they hold the data but don't affect quorum calculations, so a DC with only non-voters can serve reads after a manual promotion.
+- Arbiter nodes still need the full RabbitMQ installation; they just don't host queue data.

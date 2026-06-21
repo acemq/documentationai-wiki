@@ -1,0 +1,76 @@
+---
+title: Troubleshooting Guide
+section: 12 — Troubleshooting
+layer: L3
+audience: [sre, developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Troubleshooting Guide
+
+## Diagnostic first steps
+
+For any RabbitMQ issue, run these in order:
+
+```bash
+# 1. Is the node alive?
+rabbitmq-diagnostics ping
+
+# 2. Any alarms active?
+rabbitmqctl list_alarms
+
+# 3. Cluster state
+rabbitmqctl cluster_status
+
+# 4. Node status summary
+rabbitmq-diagnostics status
+
+# 5. Check queues with problems
+rabbitmqctl list_queues name messages consumers state --formatter pretty_table
+```
+
+## Common problem categories
+
+| Symptom | Section |
+|---|---|
+| Publishers blocked / messages not being accepted | [Memory Alarms](/troubleshooting/12-01-memory-alarms) |
+| Messages accumulating, consumers slow | [Consumer Lag](/troubleshooting/12-02-consumer-lag) |
+| Connection failures / reconnect loops | [Connection Issues](/troubleshooting/12-03-connection-issues) |
+| Publisher confirms taking > 100ms | [Slow Confirms](/troubleshooting/12-04-slow-confirms) |
+| Node won't start | [Node Startup Failures](/troubleshooting/12-05-node-startup-failures) |
+| Messages going missing | [Message Loss](/troubleshooting/12-06-message-loss) |
+| Cluster nodes not communicating | [Cluster Formation Issues](/troubleshooting/12-07-cluster-formation) |
+| Metrics endpoint not responding | [Monitoring Issues](/troubleshooting/12-08-monitoring-issues) |
+| High CPU, performance degraded | [Performance Degradation](/troubleshooting/12-09-performance-degradation) |
+| After upgrade, issues observed | [Post-Upgrade Issues](/troubleshooting/12-10-post-upgrade-issues) |
+
+## Diagnostic data collection
+
+When opening a support ticket or escalating an incident:
+
+```bash
+# Collect full diagnostic bundle
+rabbitmq-diagnostics collect_and_upload_diagnostics
+
+# Or manually:
+rabbitmq-diagnostics status > /tmp/rabbitmq-status.txt 2>&1
+rabbitmqctl cluster_status >> /tmp/rabbitmq-status.txt 2>&1
+rabbitmqctl list_queues name messages consumers state >> /tmp/rabbitmq-status.txt 2>&1
+rabbitmqctl list_connections name state >> /tmp/rabbitmq-status.txt 2>&1
+rabbitmq-diagnostics memory_breakdown >> /tmp/rabbitmq-status.txt 2>&1
+tar czf /tmp/rabbitmq-diagnostics.tar.gz /tmp/rabbitmq-status.txt /var/log/rabbitmq/
+```
+
+## Log analysis
+
+```bash
+# Recent errors
+grep -E '(error|warning)' /var/log/rabbitmq/rabbit.log | tail -50
+
+# Connection events
+grep 'connection' /var/log/rabbitmq/rabbit.log | tail -20
+
+# Memory events
+grep 'memory' /var/log/rabbitmq/rabbit.log | tail -10
+```

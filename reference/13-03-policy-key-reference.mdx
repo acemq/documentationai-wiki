@@ -1,0 +1,77 @@
+---
+title: Policy Key Reference
+section: 13 — Reference
+layer: L3
+audience: [sre, developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Policy Key Reference
+
+## Queue policy keys
+
+| Key | Type | Applies to | Description |
+|---|---|---|---|
+| `message-ttl` | integer (ms) | queues | Per-queue message TTL |
+| `expires` | integer (ms) | queues | Queue expires after this idle period |
+| `max-length` | integer | queues | Maximum number of messages |
+| `max-length-bytes` | integer | queues | Maximum total bytes of messages |
+| `overflow` | string | queues | `drop-head` (default) or `reject-publish` |
+| `dead-letter-exchange` | string | queues | Exchange for dead-lettered messages |
+| `dead-letter-routing-key` | string | queues | Routing key for dead-lettered messages |
+| `delivery-limit` | integer | quorum queues | Max delivery attempts before dead-lettering |
+| `max-in-memory-length` | integer | quorum queues | Max messages kept in memory |
+| `max-in-memory-bytes` | integer | quorum queues | Max bytes kept in memory |
+
+## Exchange policy keys
+
+| Key | Type | Applies to | Description |
+|---|---|---|---|
+| `alternate-exchange` | string | exchanges | Exchange for unroutable messages |
+| `federation-upstream` | string | exchanges | Named federation upstream |
+| `federation-upstream-set` | string | exchanges | Set of federation upstreams |
+
+## Common policy examples
+
+```bash
+# 1-hour message TTL
+rabbitmqctl set_policy ttl "^transient\." \
+  '{"message-ttl": 3600000}' --apply-to queues
+
+# Max 1M messages, reject on overflow
+rabbitmqctl set_policy max-length ".*" \
+  '{"max-length": 1000000, "overflow": "reject-publish"}' \
+  --apply-to queues --priority 1
+
+# DLX for all queues
+rabbitmqctl set_policy dlx ".*" \
+  '{"dead-letter-exchange": "dlx"}' \
+  --apply-to queues --priority 50
+
+# Delivery limit for quorum queues
+rabbitmqctl set_policy delivery-limit ".*" \
+  '{"delivery-limit": 3}' \
+  --apply-to quorum-queues --priority 100
+
+# Shovel
+rabbitmqctl set_parameter shovel link-name \
+  '{"src-protocol": "amqp091", "src-uri": "...", "src-queue": "...",
+    "dest-protocol": "amqp091", "dest-uri": "...", "dest-exchange": "...",
+    "ack-mode": "on-confirm"}'
+
+# Federation upstream
+rabbitmqctl set_parameter federation-upstream name \
+  '{"uri": "amqp://...", "prefetch-count": 100}'
+```
+
+## apply-to values
+
+| Value | Applies to |
+|---|---|
+| `queues` | All queue types |
+| `classic-queues` | Classic queues only |
+| `quorum-queues` | Quorum queues only |
+| `streams` | Stream queues only |
+| `exchanges` | Exchanges |
+| `all` | Queues and exchanges |

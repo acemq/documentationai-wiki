@@ -1,0 +1,82 @@
+---
+title: Consumer Lag
+section: 12 — Troubleshooting
+layer: L3
+audience: [sre, developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Consumer Lag
+
+## Symptoms
+
+- Queue depth (`messages_ready`) growing continuously
+- Consumer utilization approaching 1.0
+- Message delivery latency increasing
+- SLA breach for message processing time
+
+## Diagnosis
+
+```bash
+# Queue depth and consumer count
+rabbitmqctl list_queues name messages consumers consumer_utilisation \
+  --formatter pretty_table | sort -k2 -rn
+
+# Delivery rate vs. incoming rate
+# If delivery_rate < incoming_rate, consumers are lagging
+rabbitmqctl list_queues name messages_ready messages_unacknowledged \
+  messages_published messages_delivered --formatter pretty_table
+
+# Consumer details
+rabbitmqctl list_consumers queue_name consumer_tag prefetch_count ack_required
+```
+
+## Common causes
+
+| Cause | Indicator | Fix |
+|---|---|---|
+| Not enough consumers | Consumer count low, utilization = 1.0 | Add consumers |
+| Prefetch too low | Utilization < 0.5 with growing queue | Increase prefetch |
+| Processing errors (requeue loop) | High redelivery rate | Check DLX; fix processing |
+| Slow downstream (DB, external API) | Consumer CPU low but queue growing | Async processing; connection pooling |
+| Dead consumers (no heartbeat) | Connections stale, no acks | Fix client heartbeat configuration |
+
+## Check for requeue loops
+
+```bash
+# High redelivery rate indicates consumers nacking and requeueing
+rabbitmqctl list_queues name messages_redelivered --formatter pretty_table
+
+# Check delivery limit (poison message handling)
+rabbitmqctl list_queues name effective_policy_definition | grep delivery-limit
+```
+
+If no `delivery-limit` is set and messages are being repeatedly nacked, they requeue indefinitely and consume consumer capacity.
+
+## Scaling consumers
+
+```bash
+# Kubernetes: increase consumer deployment replicas
+kubectl scale deployment order-consumer --replicas=10
+
+# Docker: add consumer containers
+docker-compose scale consumer=10
+```
+
+## Tuning prefetch
+
+```python
+# Current prefetch is 1 (serial processing)
+channel.basic_qos(prefetch_count=1)
+
+# Increase to 20 for 10ms processing tasks
+channel.basic_qos(prefetch_count=20)
+# Measure: if consumer_utilisation is still > 0.9, increase further
+```
+
+## AceMQ Take
+
+- Requeue loops without `delivery-limit` are a common cause of consumer lag. The consumer is busy retrying failed messages instead of processing new ones.
+- Consumer utilization of 0.5 with a growing queue means prefetch is too low, not that you need more consumers.
+- Horizontal scaling (more consumers) is the right fix only when utilization is near 1.0 and prefetch is already tuned.

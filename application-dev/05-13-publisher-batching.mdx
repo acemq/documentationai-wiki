@@ -1,0 +1,86 @@
+---
+title: Publisher Batching
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Publisher Batching
+
+## When to batch
+
+Batching amortizes per-message overhead: connection round-trips, Raft log entries, and WAL fsyncs. Use batching when:
+- Publishing > 500 independent messages per second from a single publisher
+- Latency tolerance allows 10–100ms batch accumulation delay
+- Messages are logically related (same logical event stream)
+
+## In-memory batch with async confirms
+
+```python
+BATCH_SIZE = 500
+BATCH_TIMEOUT_MS = 50
+
+batch = []
+batch_lock = threading.Lock()
+
+def publish_batch():
+    with batch_lock:
+        messages = batch[:]
+        batch.clear()
+
+    for msg in messages:
+        channel.basic_publish(
+            exchange="events",
+            routing_key=msg["key"],
+            body=msg["body"],
+            properties=msg["props"]
+        )
+
+    channel.wait_for_confirms()
+    logger.info(f"Batch of {len(messages)} confirmed")
+```
+
+## Outbox pattern (reliable batching)
+
+For at-least-once guarantees with batching, use the transactional outbox:
+
+```python
+def create_order(db, order):
+    with db.transaction():
+        db.execute("INSERT INTO orders ...", order)
+        db.execute(
+            "INSERT INTO outbox (exchange, routing_key, body) VALUES (?, ?, ?)",
+            ("orders", "order.created", json.dumps(order))
+        )
+    # Separate process reads outbox and publishes
+```
+
+```python
+# Outbox relay
+def relay_outbox():
+    while True:
+        rows = db.execute("SELECT * FROM outbox WHERE published_at IS NULL LIMIT 500")
+        if rows:
+            for row in rows:
+                channel.basic_publish(...)
+            channel.wait_for_confirms()
+            db.execute("UPDATE outbox SET published_at = NOW() WHERE id IN (?)", ids)
+        time.sleep(0.05)
+```
+
+## AMQP transactions (avoid)
+
+AMQP 0-9-1 has a transaction mode (`tx.select`, `tx.commit`) but it is:
+- Much slower than publisher confirms (2–5x)
+- Not composable with quorum queue confirms
+- Deprecated in practice
+
+Use publisher confirms + the outbox pattern instead.
+
+## AceMQ Take
+
+- Batch up to 500 messages per confirm round-trip for high-throughput scenarios.
+- The outbox pattern is the correct way to publish from a database transaction. It guarantees at-least-once delivery without AMQP transactions.
+- Never use AMQP transactions in production. They serialize message delivery and provide no benefit over publisher confirms.

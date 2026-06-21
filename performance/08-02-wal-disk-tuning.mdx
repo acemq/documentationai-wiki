@@ -1,0 +1,85 @@
+---
+title: WAL & Disk Tuning
+section: 08 — Performance
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# WAL & Disk Tuning
+
+## Why WAL matters
+
+Every quorum queue publish requires the Raft leader to append to the Write-Ahead Log (WAL) and call `fdatasync` before sending the publisher confirm. The WAL is on the data disk. If `fdatasync` is slow, confirms are slow.
+
+## Disk requirements
+
+| Disk type | WAL fdatasync p99 | Suitable for RabbitMQ? |
+|---|---|---|
+| NVMe SSD | < 1ms | Yes (recommended) |
+| SATA SSD | 1–5ms | Yes |
+| Networked SSD (EBS gp3) | 3–15ms | Marginal; provision high IOPS |
+| HDD | 5–20ms | No for quorum queues |
+| Networked HDD | > 20ms | No |
+
+## Measuring current WAL latency
+
+```bash
+# Via Prometheus
+histogram_quantile(0.99, rate(rabbitmq_ra_log_wal_write_duration_seconds_bucket[5m]))
+
+# Via CLI
+rabbitmq-diagnostics disk_space
+
+# Direct I/O test (fio)
+fio --name=wal-test --ioengine=sync --rw=write --bs=4k \
+    --size=1G --fsync=1 --filename=/var/lib/rabbitmq/test.fio \
+    --iodepth=1 --numjobs=1
+# Look for fsync latency percentiles in the output
+```
+
+## WAL configuration
+
+```ini
+# rabbitmq.conf
+# WAL file size before rotation (default: 128 MB)
+ra.wal_max_size_bytes = 134217728
+
+# Write strategy: default is O_SYNC; use write_sync for NVMe
+ra.wal_write_strategy = o_sync
+```
+
+For NVMe drives, the default is already optimal. For networked storage:
+
+```ini
+# Increase WAL batch size to reduce fdatasync frequency
+ra.wal_max_batch_size = 4096
+```
+
+## Separate WAL from message data
+
+Put the Raft WAL on a different disk from the message data store:
+
+```bash
+# Mount WAL to a separate NVMe
+mount /dev/nvme1n1 /var/lib/rabbitmq/mnesia/rabbit@node1/quorum/wal
+```
+
+This prevents message data I/O from competing with WAL fsyncs.
+
+## Linux I/O scheduler
+
+For NVMe drives:
+```bash
+cat /sys/block/nvme0n1/queue/scheduler  # should be "none" or "mq-deadline"
+
+# Set scheduler
+echo "none" > /sys/block/nvme0n1/queue/scheduler
+```
+
+## AceMQ Take
+
+- The minimum hardware requirement for quorum queues in production: NVMe or high-IOPS SSD. This is not negotiable.
+- Networked storage (EBS, EFS, NFS) requires careful IOPS provisioning. Test with fio before deploying.
+- Separate WAL and data disks when WAL latency is your bottleneck under mixed read/write workloads.

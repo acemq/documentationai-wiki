@@ -1,0 +1,98 @@
+---
+title: TLS Configuration
+section: 06 — Security
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# TLS Configuration
+
+## Basic TLS setup
+
+```ini
+# rabbitmq.conf
+
+# Disable plaintext AMQP
+listeners.tcp = none
+
+# Enable TLS AMQP
+listeners.ssl.default = 5671
+
+ssl_options.certfile = /etc/rabbitmq/certs/server.crt
+ssl_options.keyfile  = /etc/rabbitmq/certs/server.key
+ssl_options.cacertfile = /etc/rabbitmq/certs/ca.crt
+
+ssl_options.versions.1 = tlsv1.3
+ssl_options.versions.2 = tlsv1.2
+
+ssl_options.verify = verify_peer
+ssl_options.fail_if_no_peer_cert = true
+
+# Management API TLS
+management.ssl.port = 15671
+management.ssl.certfile = /etc/rabbitmq/certs/server.crt
+management.ssl.keyfile  = /etc/rabbitmq/certs/server.key
+management.ssl.cacertfile = /etc/rabbitmq/certs/ca.crt
+```
+
+## Inter-node TLS
+
+```ini
+# advanced.config (Erlang term format)
+[
+  {ssl, [{versions, ['tlsv1.3', 'tlsv1.2']}]},
+  {rabbit, [
+    {ssl_dist_opt, [
+      {server_certfile, "/etc/rabbitmq/certs/server.crt"},
+      {server_keyfile,  "/etc/rabbitmq/certs/server.key"},
+      {server_cacertfile, "/etc/rabbitmq/certs/ca.crt"},
+      {server_verify, verify_peer},
+      {server_fail_if_no_peer_cert, true}
+    ]}
+  ]}
+].
+```
+
+## Client-side TLS (Python)
+
+```python
+import ssl
+
+ssl_context = ssl.create_default_context(
+    cafile="/etc/certs/ca.crt"
+)
+ssl_context.load_cert_chain(
+    certfile="/etc/certs/client.crt",
+    keyfile="/etc/certs/client.key"
+)
+
+params = pika.ConnectionParameters(
+    host="rabbitmq.internal",
+    port=5671,
+    ssl_options=pika.SSLOptions(ssl_context),
+    credentials=pika.PlainCredentials("app-svc", password)
+)
+```
+
+## Certificate rotation
+
+```bash
+# Check current certificate expiry
+openssl x509 -enddate -noout -in /etc/rabbitmq/certs/server.crt
+
+# After delivering new certificate
+rabbitmqctl eval 'ssl:clear_pem_cache().'
+
+# For full rotation (rolling restart, one node at a time)
+rabbitmqctl stop_app
+# Replace cert files
+rabbitmqctl start_app
+```
+
+## AceMQ Take
+
+- Use `verify_peer` + `fail_if_no_peer_cert: true` for all internal services. This is mutual TLS — both sides authenticate.
+- Set up certificate expiry alerting. A lapsed broker certificate causes all client connections to fail simultaneously.
+- For Kubernetes, use cert-manager to automate certificate issuance and rotation.

@@ -1,0 +1,45 @@
+---
+title: Quick Start by Role
+section: 00 — Start Here
+layer: L3
+audience: [all]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Quick Start by Role
+
+## Developer (building applications)
+
+1. [AMQP 0-9-1 Model](/core-concepts/01-01-amqp-model) — understand exchanges, queues, bindings
+2. [Queue Type Decision Guide](/queue-types/02-01-queue-type-decision) — choose the right queue type
+3. [Connections & Channels](/application-dev/05-01-connections-channels) — connection pooling and channel safety
+4. [Publisher Confirms](/application-dev/05-02-publisher-confirms) — at-least-once delivery
+5. [Consumer Ack & Prefetch](/application-dev/05-03-consumer-ack-prefetch) — manual ack and prefetch tuning
+6. [DLX & Retry Pattern](/application-dev/05-04-dlx-retry-pattern) — dead-letter handling
+
+## SRE / Platform Engineer (operating clusters)
+
+1. [Monitoring Strategy](/monitoring/07-01-monitoring-strategy) — what to monitor and alert on
+2. [Key Metrics Reference](/monitoring/07-03-key-metrics-reference) — the 10 metrics that matter
+3. [Memory & Disk Alarms](/monitoring/07-06-memory-disk-alarms) — alarm thresholds and response
+4. [Daily Operational Checklist](/operations/09-01-daily-operational-checklist) — what to check every day
+5. [Security Checklist](/security/06-01-security-checklist) — production security gates
+6. [DR Runbooks](/ha-dr/11-07-dr-runbooks) — recovery procedures
+
+## Architect (designing systems)
+
+1. [Standalone vs. Cluster](/architecture/03-01-standalone-vs-cluster) — when to cluster
+2. [Partition Handling](/architecture/03-04-partition-handling) — network partition behavior
+3. [Multi-DC Architecture](/architecture/03-08-multi-dc-architecture) — geo-distribution options
+4. [HA Fundamentals](/ha-dr/11-01-ha-fundamentals) — HA vs. DR distinction
+5. [RTO & RPO Planning](/ha-dr/11-06-rto-rpo-planning) — availability targets
+6. [Compliance Framework](/security/06-09-compliance-framework) — PCI DSS, HIPAA, SOC 2
+
+## Upgrading from 3.x to 4.x
+
+1. [Road to 4.x Preparations](/upgrades/10-02-road-to-4x-preparations)
+2. [Classic to Quorum Migration](/upgrades/10-03-classic-to-quorum-migration)
+3. [Upgrade 3.13 → 4.x & Khepri](/upgrades/10-05-upgrade-313-4x-khepri)
+4. [RabbitMQ 4 Breaking Changes](/upgrades/10-07-rabbitmq4-breaking-changes)
+5. [Post-Upgrade Validation](/upgrades/10-08-post-upgrade-validation)

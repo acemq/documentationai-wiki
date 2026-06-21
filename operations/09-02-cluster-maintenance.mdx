@@ -1,0 +1,99 @@
+---
+title: Cluster Maintenance
+section: 09 — Operations
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Cluster Maintenance
+
+## Safe node stop procedure
+
+Before stopping any node:
+
+```bash
+# 1. Check if the node is quorum-critical
+rabbitmq-diagnostics check_if_node_is_quorum_critical
+# If this returns non-zero, stopping the node will break quorum
+
+# 2. Check queue leaders on this node
+rabbitmqctl list_queues name leader | grep $(hostname)
+
+# 3. Drain the node: move consumers away
+# Scale down application instances connected to this node first
+
+# 4. Stop the node
+rabbitmqctl stop_app
+rabbitmqctl shutdown  # or systemctl stop rabbitmq-server
+```
+
+## Node removal from cluster
+
+```bash
+# Option A: from the node being removed
+rabbitmqctl stop_app
+rabbitmqctl reset
+
+# Option B: from another node (when the node is offline)
+rabbitmqctl -n rabbit@other-node forget_cluster_node rabbit@node-to-remove
+```
+
+## Adding a node to the cluster
+
+```bash
+# 1. Install RabbitMQ on new node with same Erlang cookie
+echo "<erlang-cookie>" > /var/lib/rabbitmq/.erlang.cookie
+chmod 400 /var/lib/rabbitmq/.erlang.cookie
+chown rabbitmq:rabbitmq /var/lib/rabbitmq/.erlang.cookie
+
+# 2. Start RabbitMQ
+rabbitmqctl start_app
+
+# 3. Join the cluster
+rabbitmqctl stop_app
+rabbitmqctl join_cluster rabbit@existing-node
+rabbitmqctl start_app
+
+# 4. Verify
+rabbitmqctl cluster_status
+```
+
+## Rolling restart
+
+For node OS or RabbitMQ restarts without downtime:
+
+```bash
+# Restart one node at a time, verify before moving to next
+for node in node1 node2 node3; do
+  ssh $node "sudo systemctl restart rabbitmq-server"
+  # Wait for node to come back online
+  until rabbitmqctl -n rabbit@$node ping; do sleep 5; done
+  echo "$node is back"
+  # Wait for quorum queues to recover
+  sleep 30
+done
+
+# After all nodes restarted, rebalance leaders
+rabbitmq-queues rebalance quorum
+```
+
+## Disk space management
+
+```bash
+# Check disk usage
+df -h /var/lib/rabbitmq
+
+# Compact WAL (if WAL is consuming excessive space)
+rabbitmqctl eval 'ra:force_checkpoint(ra_log_wal).'
+
+# Remove old log files
+find /var/log/rabbitmq -name '*.log.*' -mtime +7 -delete
+```
+
+## AceMQ Take
+
+- Never stop two nodes simultaneously in a 3-node cluster. This always breaks quorum.
+- After a rolling restart, quorum queue leaders drift. Always run `rabbitmq-queues rebalance quorum` as the final step.
+- When removing a node permanently, use `forget_cluster_node` to cleanly remove it from Khepri state. Forgetting a node without doing this leaves ghost entries.

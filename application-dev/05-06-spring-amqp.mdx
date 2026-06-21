@@ -1,0 +1,119 @@
+---
+title: Spring AMQP
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Spring AMQP
+
+## Dependency
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-amqp</artifactId>
+</dependency>
+```
+
+## Connection configuration
+
+```yaml
+# application.yml
+spring:
+  rabbitmq:
+    host: rabbitmq.internal
+    port: 5671
+    username: app-svc
+    password: ${RABBITMQ_PASSWORD}
+    virtual-host: production
+    ssl:
+      enabled: true
+      verify-hostname: true
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 20
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000
+          multiplier: 2.0
+```
+
+## Declaring infrastructure
+
+```java
+@Configuration
+public class RabbitConfig {
+
+    @Bean
+    public Queue ordersQueue() {
+        return QueueBuilder.durable("orders")
+            .withArgument("x-queue-type", "quorum")
+            .withArgument("x-dead-letter-exchange", "orders.dlx")
+            .build();
+    }
+
+    @Bean
+    public TopicExchange ordersExchange() {
+        return ExchangeBuilder.topicExchange("orders").durable(true).build();
+    }
+
+    @Bean
+    public Binding ordersBinding(Queue ordersQueue, TopicExchange ordersExchange) {
+        return BindingBuilder.bind(ordersQueue).to(ordersExchange).with("order.#");
+    }
+}
+```
+
+## Publishing with confirms
+
+```java
+@Service
+public class OrderPublisher {
+
+    private final RabbitTemplate rabbitTemplate;
+
+    public void publish(Order order) {
+        CorrelationData correlation = new CorrelationData(order.getId());
+        rabbitTemplate.convertAndSend("orders", "order.created", order, correlation);
+
+        correlation.getFuture().whenComplete((confirm, ex) -> {
+            if (confirm != null && confirm.isAck()) {
+                log.info("Order {} confirmed", order.getId());
+            } else {
+                log.error("Order {} nacked — retrying", order.getId());
+                // retry logic
+            }
+        });
+    }
+}
+```
+
+## Consumer with manual ack
+
+```java
+@RabbitListener(queues = "orders", ackMode = "MANUAL")
+public void processOrder(Order order, Channel channel,
+                          @Header(AmqpHeaders.DELIVERY_TAG) long tag) throws Exception {
+    try {
+        orderService.process(order);
+        channel.basicAck(tag, false);
+    } catch (RetryableException e) {
+        channel.basicNack(tag, false, true);  // requeue
+    } catch (Exception e) {
+        channel.basicNack(tag, false, false); // dead-letter
+    }
+}
+```
+
+## AceMQ Take
+
+- Always set `publisher-confirm-type: correlated` and `publisher-returns: true` in production.
+- Set `acknowledge-mode: manual` on all listeners. Spring's default auto-ack will lose messages on application crash.
+- Avoid Spring Retry's default exponential backoff for message-level retries — it blocks the consumer thread and reduces throughput. Use a TTL-retry queue instead.

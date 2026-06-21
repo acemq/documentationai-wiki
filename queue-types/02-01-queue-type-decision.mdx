@@ -1,0 +1,76 @@
+---
+title: Queue Type Decision Guide
+section: 02 — Queue Types
+layer: L3
+audience: [developer, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Queue Type Decision Guide
+
+## Decision flowchart
+
+```
+Do you need durability (survives restart)?
+├── NO  → Classic queue (transient)
+└── YES →
+    Do you need replay / multiple independent consumers?
+    ├── YES → Stream queue
+    └── NO  →
+        Do you need HA / replication?
+        ├── YES → Quorum queue  ← default choice
+        └── NO  → Classic queue (single-node, lazy mode)
+```
+
+## Comparison table
+
+| Feature | Quorum | Classic | Stream |
+|---|---|---|---|
+| Replication | Yes (Raft) | No | Yes (log-based) |
+| At-least-once delivery | Yes | Yes | Yes |
+| Message ordering | Per-queue | Per-queue | Per-partition |
+| Max priority | No | Yes (up to 255) | No |
+| Per-message TTL | No* | Yes | Offset-based retention |
+| Replay | No | No | Yes |
+| Poison message handling | `delivery-limit` | Manual | Manual |
+| Available in 4.x | Yes | Yes (lazy always-on) | Yes |
+
+*Quorum queues support `message-ttl` via policy for message expiry.
+
+## Declaration examples
+
+```python
+# Quorum queue (recommended for durable workloads)
+channel.queue_declare(
+    queue="orders",
+    durable=True,
+    arguments={"x-queue-type": "quorum"}
+)
+
+# Stream queue
+channel.queue_declare(
+    queue="events",
+    durable=True,
+    arguments={"x-queue-type": "stream"}
+)
+
+# Classic queue (single-node, lazy)
+channel.queue_declare(
+    queue="cache-warmup",
+    durable=True,
+    arguments={"x-queue-type": "classic"}
+)
+```
+
+## When NOT to use quorum queues
+
+- Transient queues (reply-to, RPC response queues) — use classic, auto-delete
+- Priority queues — only classic supports `x-max-priority`
+- Queues that need `basic.get` polling (anti-pattern, but if required — classic)
+
+## AceMQ Take
+
+- If you're unsure, **use quorum queues.** They are the safe default for production workloads.
+- Classic mirrored queues are **removed in RabbitMQ 4.0.** Do not declare `x-ha-policy` — it has no effect.
+- Set `delivery-limit: 3` via policy on all quorum queues. Without it, a poison message will loop indefinitely.

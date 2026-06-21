@@ -1,0 +1,74 @@
+---
+title: STOMP Clients
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# STOMP Clients
+
+## Enable STOMP plugin
+
+```bash
+rabbitmq-plugins enable rabbitmq_stomp rabbitmq_web_stomp
+```
+
+```ini
+# rabbitmq.conf
+stomp.listeners.tcp.1 = 61613
+stomp.listeners.ssl.1 = 61614
+web_stomp.port = 15674  # WebSocket
+```
+
+## STOMP destinations to AMQP mapping
+
+| STOMP destination | AMQP equivalent |
+|---|---|
+| `/queue/orders` | Queue `orders` |
+| `/topic/events.#` | Topic exchange binding |
+| `/exchange/orders/created` | Exchange `orders`, routing key `created` |
+| `/amq/queue/orders` | Direct queue access |
+
+## JavaScript WebSocket client
+
+```javascript
+import { Client } from '@stomp/stompjs';
+
+const client = new Client({
+  brokerURL: 'wss://rabbitmq.internal:15674/ws',
+  connectHeaders: {
+    login: 'web-client',
+    passcode: '<password>',
+    'heart-beat': '10000,10000'
+  },
+  onConnect: () => {
+    client.subscribe('/queue/notifications', (message) => {
+      console.log(message.body);
+      message.ack();  // manual ack
+    }, { ack: 'client' });
+  }
+});
+
+client.activate();
+```
+
+## Publishing via STOMP
+
+```javascript
+client.publish({
+  destination: '/exchange/orders/created',
+  body: JSON.stringify({ orderId: '123', amount: 9900 }),
+  headers: {
+    'content-type': 'application/json',
+    'persistent': 'true'
+  }
+});
+```
+
+## AceMQ Take
+
+- STOMP is primarily useful for browser-based WebSocket clients. For server-side services, use AMQP 0-9-1 instead.
+- The `rabbitmq_web_stomp` plugin requires the `rabbitmq_web_dispatch` plugin, which is included by default.
+- Set `persistent: true` in STOMP message headers for durable delivery. Without it, messages are treated as transient.

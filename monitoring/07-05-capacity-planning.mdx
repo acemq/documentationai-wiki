@@ -1,0 +1,72 @@
+---
+title: Capacity Planning
+section: 07 — Monitoring
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Capacity Planning
+
+## Throughput capacity
+
+Fundamental limits per node:
+
+| Resource | Rough limit | How to scale |
+|---|---|---|
+| AMQP connections | 10–50k (depends on RAM) | Add nodes; use connection pooling |
+| Messages/sec (small, no confirm) | 100–500k | Shard across queues |
+| Messages/sec with confirms | 10–100k (WAL-bound) | Faster NVMe; more nodes |
+| Quorum queue replicas | Odd number, ≤ cluster size | Plan for 3 or 5 replicas |
+
+## Memory sizing formula
+
+```
+RAM required = 
+  messages_in_flight × avg_message_bytes × 1.5 (overhead)
+  + connections × 150KB
+  + channels × 12KB
+  + per_queue_index_overhead × queue_count
+  + OS + Erlang VM overhead (~2–4 GB)
+```
+
+Example: 1M messages × 1KB = 1 GB + connection overhead + 4 GB OS = 6–8 GB RAM needed.
+
+## Disk sizing formula
+
+```
+Disk required =
+  messages_in_queue × avg_message_bytes × 2 (write amplification)
+  + quorum_queue_raft_log (up to 512 MB per queue by default)
+  + disk_free_limit (usually 150% of max message data size)
+```
+
+Always leave `disk_free_limit` headroom. The alarm triggers before disk is full.
+
+## Trend monitoring for capacity
+
+```promql
+# Messages per day trend
+predict_linear(rabbitmq_queue_messages_ready[7d], 86400 * 30)
+
+# Disk space projection (30-day trend)
+predict_linear(rabbitmq_disk_space_available_bytes[7d], 86400 * 30)
+
+# Connection growth rate
+rate(rabbitmq_connections[7d])
+```
+
+## Sharding strategies
+
+For throughput beyond a single queue's capacity:
+
+1. **Multiple queues by partition key** — publish to `orders.0` through `orders.N` based on `order_id % N`
+2. **Consistent hash exchange** — `rabbitmq_consistent_hash_exchange` plugin distributes messages across bound queues automatically
+3. **Multiple vHosts** — for tenant isolation, not throughput sharding
+
+## AceMQ Take
+
+- Build capacity projections into your monthly operational review. Unexpected traffic growth has caused multiple production incidents.
+- Model both message volume AND message size. A 2× increase in average message size is equivalent to a 2× increase in throughput for storage and network purposes.
+- Include WAL I/O in your capacity model. It is the most common scaling bottleneck and the least obvious.

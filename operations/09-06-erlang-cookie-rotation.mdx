@@ -1,0 +1,84 @@
+---
+title: Erlang Cookie Rotation
+section: 09 — Operations
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Erlang Cookie Rotation
+
+## Why the Erlang cookie matters
+
+The Erlang cookie is a shared secret used for cluster authentication. All nodes in a cluster must have the same cookie. A compromised cookie allows an attacker to join an arbitrary node to your cluster.
+
+## Cookie location
+
+```bash
+# Default location
+/var/lib/rabbitmq/.erlang.cookie
+
+# Check current cookie hash (not the value)
+md5sum /var/lib/rabbitmq/.erlang.cookie
+
+# DO NOT log or print the cookie value
+```
+
+## Rotation procedure
+
+Cookie rotation requires a cluster restart. There is no zero-downtime rotation path.
+
+```bash
+# Maintenance window required
+
+# 1. Export definitions backup
+rabbitmqctl export_definitions /tmp/definitions-pre-rotation.json
+
+# 2. Stop all nodes (stop in reverse join order)
+for node in node3 node2 node1; do
+  ssh $node "sudo rabbitmqctl stop_app && sudo systemctl stop rabbitmq-server"
+done
+
+# 3. Generate new cookie
+NEW_COOKIE=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
+
+# 4. Distribute new cookie to all nodes
+for node in node1 node2 node3; do
+  echo "$NEW_COOKIE" | ssh $node "sudo tee /var/lib/rabbitmq/.erlang.cookie"
+  ssh $node "sudo chmod 400 /var/lib/rabbitmq/.erlang.cookie && \
+             sudo chown rabbitmq:rabbitmq /var/lib/rabbitmq/.erlang.cookie"
+done
+
+# 5. Store new cookie in secrets manager
+vault kv put secret/rabbitmq/erlang-cookie value="$NEW_COOKIE"
+
+# 6. Start all nodes (start in original join order)
+for node in node1 node2 node3; do
+  ssh $node "sudo systemctl start rabbitmq-server"
+  until rabbitmqctl -n rabbit@$node ping 2>/dev/null; do sleep 5; done
+done
+
+# 7. Verify cluster
+rabbitmqctl cluster_status
+```
+
+## Kubernetes rotation
+
+For Kubernetes Operator deployments, update the Secret and trigger a rolling restart:
+
+```bash
+# Update the secret
+kubectl create secret generic rabbitmq-erlang-cookie \
+  --from-literal=.erlang.cookie="$(openssl rand -base64 32)" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# Trigger rolling restart
+kubectl rollout restart statefulset rabbitmq
+```
+
+## AceMQ Take
+
+- Rotate the Erlang cookie annually or after any personnel change with cluster access. This is a compliance requirement in regulated environments.
+- The cookie rotation requires a restart window. Schedule it during low-traffic periods and test your failover runbook before the window.
+- Never store the raw cookie in version control, configuration files, or CI/CD environment variables. Use a secrets manager.

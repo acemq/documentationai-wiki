@@ -1,0 +1,65 @@
+---
+title: Partition Handling
+section: 03 — Architecture
+layer: L2
+audience: [architect, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Partition Handling
+
+🐇 **Upstream reference:** [Clustering and Network Partitions](https://www.rabbitmq.com/docs/partitions)
+
+## RabbitMQ 4.3+ note
+
+**If you are on RabbitMQ 4.3.0 or later:** Mnesia has been removed and replaced by the Raft-based Khepri metadata store. Partition handling strategies (`pause_minority`, `autoheal`, `pause_if_all_down`) **no longer exist**. All replicated features are now Raft-based. This page applies to RabbitMQ 3.13–4.2.
+
+## Partition handling in 3.13–4.2
+
+In RabbitMQ 3.13–4.2, Mnesia is the metadata store. A network partition can cause split-brain: both sides of a partition continue operating and diverge.
+
+### Strategies
+
+| Strategy | Behavior | When to use |
+|---|---|---|
+| `ignore` | Do nothing; manual recovery required | Never in production |
+| `pause_minority` | Nodes in the minority partition pause themselves | **Recommended** for 3.x |
+| `autoheal` | The minority side restarts automatically | Low-traffic scenarios |
+| `pause_if_all_down` | Pause if listed nodes are unreachable | Specific multi-DC topologies |
+
+```ini
+# rabbitmq.conf (3.13–4.2 only)
+cluster_partition_handling = pause_minority
+```
+
+### Why `pause_minority` is the safe choice
+
+With `pause_minority`, the smaller partition pauses itself and waits for reconnection. The majority side continues serving traffic. This prevents split-brain at the cost of availability for the minority.
+
+For a 3-node cluster: if one node loses connectivity, it pauses. The 2-node majority continues.
+
+## Raft-based partition behavior (quorum queues, all versions)
+
+Quorum queues use Raft and handle partitions correctly by design:
+
+- **Leader disconnects:** Remaining majority elects a new leader in seconds
+- **Follower disconnects:** Majority continues; follower catches up on reconnect
+- **Non-member disconnects:** No impact on queue availability
+
+## Detecting partitions
+
+```bash
+# Check partition status
+rabbitmqctl cluster_status
+# Look for: {partitions, []} (good) vs {partitions, [rabbit@node2]} (partitioned)
+
+# Check quorum queue status
+rabbitmq-queues quorum_status <queue-name>
+```
+
+## AceMQ Take
+
+- On 3.13–4.2: always set `cluster_partition_handling = pause_minority`.
+- On 4.0+: the only partition handling that matters is quorum requirements for Raft-based components. Monitor `rabbitmq_ra_log_commit_latency_seconds` for signs of Raft instability.
+- A `net_ticktime = 10` setting provides faster partition detection on reliable LAN networks.

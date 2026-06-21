@@ -1,0 +1,66 @@
+---
+title: Key Metrics Reference
+section: 07 — Monitoring
+layer: L2
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Key Metrics Reference
+
+🐇 **Upstream reference:** [Monitoring with Prometheus](https://www.rabbitmq.com/docs/prometheus)
+
+## Queue health metrics
+
+| Metric | Type | Alert threshold |
+|---|---|---|
+| `rabbitmq_queue_messages_ready` | gauge | > baseline * 3 for 5min |
+| `rabbitmq_queue_messages_unacked` | gauge | > prefetch * consumers * 2 |
+| `rabbitmq_queue_consumers` | gauge | == 0 for > 60s |
+| `rabbitmq_queue_messages_published_total` | counter | Drop to 0 (publisher down) |
+| `rabbitmq_queue_messages_delivered_total` | counter | Rate ≪ publish rate (consumer lag) |
+
+## Node health metrics
+
+| Metric | Type | Alert threshold |
+|---|---|---|
+| `rabbitmq_process_resident_memory_bytes` | gauge | > 70% of `vm_memory_high_watermark` |
+| `rabbitmq_disk_space_available_bytes` | gauge | < `disk_free_limit` * 1.5 |
+| `rabbitmq_erlang_processes_used` | gauge | > 80% of `rabbitmq_erlang_processes_limit` |
+| `rabbitmq_io_write_ops_total` | counter | — (trend baseline) |
+| `rabbitmq_connections` | gauge | > 80% of `connection_max` |
+
+## Raft / quorum queue metrics
+
+| Metric | Type | Alert threshold |
+|---|---|---|
+| `rabbitmq_quorum_queue_raft_term_total` | counter | Rate > 5/min (leadership instability) |
+| `rabbitmq_ra_log_wal_write_duration_seconds` | histogram | p99 > 10ms |
+| `rabbitmq_quorum_queue_raft_log_last_applied` | gauge | Diverge between replicas > 1000 |
+| `rabbitmq_quorum_queue_raft_log_commit_index` | gauge | Stalled (no progress in 60s) |
+
+## Throughput metrics
+
+| Metric | Type | Notes |
+|---|---|---|
+| `rabbitmq_channel_messages_published_total` | counter | Rate = publish throughput |
+| `rabbitmq_channel_messages_confirmed_total` | counter | Rate = confirmed throughput |
+| `rabbitmq_channel_messages_unconfirmed` | gauge | Rising = confirm backpressure |
+| `rabbitmq_channel_messages_redelivered_total` | counter | Rising = consumer error rate |
+
+## PromQL examples
+
+```promql
+# Queue depth rate of change (positive = growing)
+rate(rabbitmq_queue_messages_ready[5m])
+
+# Consumer utilization (1.0 = fully busy)
+rabbitmq_queue_consumer_utilisation
+
+# WAL p99 latency
+histogram_quantile(0.99, rate(rabbitmq_ra_log_wal_write_duration_seconds_bucket[5m]))
+
+# Memory used as fraction of watermark
+rabbitmq_process_resident_memory_bytes / rabbitmq_resident_memory_limit_bytes
+```

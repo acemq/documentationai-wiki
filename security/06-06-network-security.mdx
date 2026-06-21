@@ -1,0 +1,90 @@
+---
+title: Network Security
+section: 06 — Security
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Network Security
+
+## Required firewall rules
+
+```
+Application → RabbitMQ
+  Port 5671 (AMQP/TLS): permit from application subnets
+  Port 5672 (AMQP): deny from all (use TLS only)
+
+Ops/Admin → RabbitMQ  
+  Port 15671 (management HTTPS): permit from ops subnets
+  Port 15672 (management HTTP): deny from all
+
+RabbitMQ node ↔ RabbitMQ node (cluster)
+  Port 4369 (EPMD): permit between cluster nodes only
+  Port 25672 (Erlang dist): permit between cluster nodes only
+
+Monitoring → RabbitMQ
+  Port 15692 (Prometheus): permit from monitoring subnet
+```
+
+## Kubernetes NetworkPolicy
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rabbitmq-network-policy
+  namespace: messaging
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          messaging/access: "true"
+    ports:
+    - port: 5671
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          monitoring: "true"
+    ports:
+    - port: 15692
+  - from:  # inter-node
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: rabbitmq
+    ports:
+    - port: 25672
+    - port: 4369
+```
+
+## Rate limiting connections
+
+```ini
+# rabbitmq.conf
+# Max connections from a single IP
+tcp_listen_options.backlog = 128
+connection_max = 10000
+```
+
+For IP-level rate limiting, use HAProxy in front of RabbitMQ:
+
+```
+frontend rabbitmq-amqp
+  stick-table type ip size 100k expire 60s store conn_cur,conn_rate(1s)
+  tcp-request connection track-sc0 src
+  tcp-request connection reject if { sc0_conn_rate ge 20 }
+```
+
+## AceMQ Take
+
+- EPMD (port 4369) is a critical attack surface. Exposing it to the internet allows external nodes to probe the Erlang cluster. Always restrict to internal networks.
+- If you use cloud security groups, create a dedicated "rabbitmq-cluster" security group that only allows 4369 and 25672 between members of the group.
+- Prometheus scrape endpoint (15692) contains queue depths and consumer counts. While not sensitive individually, restrict it to your monitoring subnet.

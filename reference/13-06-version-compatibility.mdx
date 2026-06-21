@@ -1,0 +1,73 @@
+---
+title: Version Compatibility
+section: 13 — Reference
+layer: L3
+audience: [sre, developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Version Compatibility
+
+## RabbitMQ version support
+
+| Version | Status | Release | End of Support |
+|---|---|---|---|
+| 3.12 | EOL | 2023-06 | 2024-12 |
+| 3.13 | EOL | 2024-02 | 2025-08 |
+| 4.0 | EOL | 2024-09 | 2026-03 |
+| 4.1 | EOL | 2025-01 | 2026-06 |
+| 4.2 | Active | 2025-04 | 2026-09 |
+
+## Erlang version compatibility
+
+| RabbitMQ | Minimum Erlang | Maximum Erlang | Notes |
+|---|---|---|---|
+| 3.13 | 26.0 | 26.x | 27.x not supported |
+| 4.0 | 26.0 | 27.x | |
+| 4.1 | 26.2 | 27.x | |
+| 4.2 | 26.2 | 27.x | |
+
+## Client library compatibility
+
+| Client | Language | Supports AMQP 0-9-1 | Supports AMQP 1.0 | Notes |
+|---|---|---|---|---|
+| amqp091-go | Go | Yes | No | Official RabbitMQ client |
+| amqplib | Node.js | Yes | No | Most widely used Node client |
+| pika | Python | Yes | No | Synchronous |
+| aio-pika | Python | Yes | No | Asyncio |
+| spring-amqp | Java | Yes | Via JMS | Spring ecosystem |
+| RabbitMQ.Client | .NET | Yes | Yes (via AMQP 1.0 client) | Official .NET client |
+| rabbitmq-stream | Java | No | No | Stream queues only |
+
+## Feature matrix by version
+
+| Feature | 3.13 | 4.0 | 4.1 | 4.2 |
+|---|---|---|---|---|
+| Quorum queues | ✅ | ✅ | ✅ | ✅ |
+| Classic queues (non-mirrored) | ✅ | ✅ | ✅ | ✅ |
+| Classic mirrored queues | ⚠️ Deprecated | ❌ Removed | ❌ | ❌ |
+| Stream queues | ✅ | ✅ | ✅ | ✅ |
+| AMQP 1.0 | ✅ (plugin) | ✅ (built-in) | ✅ | ✅ |
+| MQTT | ✅ | ✅ | ✅ | ✅ |
+| STOMP | ✅ | ✅ | ✅ | ✅ |
+| Khepri metadata store | ✅ (opt-in) | ✅ (opt-in) | ✅ (default) | ✅ (default) |
+| Mnesia metadata store | ✅ (default) | ✅ (default) | ⚠️ Deprecated | ❌ Removed |
+| partition_handling strategies | ✅ (3.13) | ✅ (4.0-4.2) | ✅ | ❌ Removed in 4.3 |
+| OAuth 2.0 authentication | ✅ | ✅ | ✅ | ✅ |
+
+## Breaking changes summary
+
+| Version | Breaking change | Migration required |
+|---|---|---|
+| 4.0 | Classic mirrored queues removed | Yes: migrate to quorum queues |
+| 4.0 | Default queue type changed to quorum | Yes: audit queue declarations |
+| 4.1 | Khepri default (Mnesia deprecated) | No: automatic |
+| 4.3 | Mnesia removed | Yes: must be on Khepri |
+| 4.3 | Partition handling strategies removed | Yes: remove config keys |
+
+## AceMQ Take
+
+- Always check the Erlang version requirements before upgrading RabbitMQ. Installing a new RabbitMQ version without upgrading Erlang is a common failure mode.
+- The AMQP 1.0 client compatibility row is important for .NET shops: the `RabbitMQ.Client` 7.x+ supports AMQP 1.0 natively; older versions do not.
+- The feature matrix `4.3` column is a forward reference for planning: if you're on 4.x now, be aware that Mnesia and partition handling strategies will be removed in 4.3.

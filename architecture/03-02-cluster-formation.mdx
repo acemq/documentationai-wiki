@@ -1,0 +1,86 @@
+---
+title: Cluster Formation
+section: 03 — Architecture
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Cluster Formation
+
+## Formation mechanisms
+
+RabbitMQ supports several peer discovery backends:
+
+| Backend | How it works | Best for |
+|---|---|---|
+| **Classic config** | Static node list in `rabbitmq.conf` | Fixed infrastructure, bare metal |
+| **DNS** | Query a DNS name that returns peer IPs | Kubernetes headless services |
+| **AWS EC2** | Queries EC2 tags to find peers | AWS Auto Scaling Groups |
+| **Kubernetes** | Queries Kubernetes API | RabbitMQ Operator |
+| **Consul / etcd** | Registration via Consul/etcd | HashiCorp stack |
+
+## Static configuration (bare metal)
+
+```ini
+# rabbitmq.conf
+cluster_formation.peer_discovery_backend = classic_config
+cluster_formation.classic_config.nodes.1 = rabbit@node1.internal
+cluster_formation.classic_config.nodes.2 = rabbit@node2.internal
+cluster_formation.classic_config.nodes.3 = rabbit@node3.internal
+```
+
+## Kubernetes DNS discovery
+
+```ini
+# rabbitmq.conf
+cluster_formation.peer_discovery_backend = rabbit_peer_discovery_dns
+cluster_formation.dns.hostname = rabbitmq-headless.rabbitmq.svc.cluster.local
+```
+
+This requires a Kubernetes headless Service (ClusterIP: None) that resolves to all pod IPs.
+
+## Erlang cookie
+
+All cluster nodes must share the same **Erlang cookie** — a shared secret used for Erlang distribution authentication:
+
+```bash
+# Must be identical on all nodes
+cat /var/lib/rabbitmq/.erlang.cookie
+
+# Or set via environment variable
+RABBIT_ERLANG_COOKIE=<32-char-secret>
+```
+
+A cookie mismatch causes cluster formation to silently fail with an `authentication failed` error in the logs.
+
+## Adding nodes to an existing cluster
+
+```bash
+# On the NEW node (after starting rabbitmq-server)
+rabbitmqctl stop_app
+rabbitmqctl reset
+rabbitmqctl join_cluster rabbit@node1
+rabbitmqctl start_app
+
+# Verify
+rabbitmqctl cluster_status
+```
+
+## Removing nodes
+
+```bash
+# From the node being removed
+rabbitmqctl stop_app
+rabbitmqctl reset
+
+# From another cluster node (if the removed node is gone)
+rabbitmqctl forget_cluster_node rabbit@dead-node
+```
+
+## AceMQ Take
+
+- In Kubernetes, use the RabbitMQ Cluster Operator — it handles peer discovery, rolling upgrades, and PVC management automatically.
+- Never manually `forget_cluster_node` for a node that is temporarily unavailable. Only use it for permanently decommissioned nodes.
+- Store the Erlang cookie in your secrets manager. A rotated cookie requires cluster re-formation.

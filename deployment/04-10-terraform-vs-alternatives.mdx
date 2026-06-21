@@ -1,0 +1,85 @@
+---
+title: Terraform vs. Alternatives
+section: 04 — Deployment
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Terraform vs. Alternatives
+
+## Infrastructure provisioning options
+
+| Tool | What it provisions | Best for |
+|---|---|---|
+| **Terraform** | VMs, VPC, security groups, DNS | Cloud infrastructure |
+| **Pulumi** | Same as Terraform, in real code | Terraform alternative |
+| **Ansible** | OS config, RabbitMQ installation | Post-VM configuration |
+| **Kubernetes Operator** | RabbitMQ cluster lifecycle | Kubernetes environments |
+| **Cloud-native IaC** | CDK, Bicep, CloudFormation | AWS/Azure-specific shops |
+
+## Terraform + Ansible pattern
+
+A common pattern: Terraform provisions infrastructure, Ansible configures RabbitMQ:
+
+```hcl
+# Terraform: provision VMs and networking
+resource "aws_instance" "rabbitmq" {
+  count         = 3
+  instance_type = "i3.xlarge"
+  ami           = data.aws_ami.ubuntu_22.id
+  subnet_id     = element(var.private_subnets, count.index)
+
+  tags = {
+    Name = "rabbitmq-${count.index + 1}"
+    Role = "rabbitmq"
+  }
+}
+
+resource "aws_security_group_rule" "rabbitmq_amqp" {
+  type        = "ingress"
+  from_port   = 5671
+  to_port     = 5671
+  protocol    = "tcp"
+  cidr_blocks = [var.app_cidr]
+  security_group_id = aws_security_group.rabbitmq.id
+}
+```
+
+```yaml
+# Ansible: install and configure RabbitMQ on provisioned VMs
+- hosts: tag_Role_rabbitmq
+  roles:
+    - rabbitmq_install
+    - rabbitmq_cluster
+    - rabbitmq_topology
+```
+
+## RabbitMQ Terraform provider
+
+The community `cyrilgdn/rabbitmq` Terraform provider can manage RabbitMQ topology (vHosts, users, policies) directly:
+
+```hcl
+resource "rabbitmq_vhost" "production" {
+  name = "production"
+}
+
+resource "rabbitmq_policy" "delivery_limit" {
+  name  = "delivery-limit"
+  vhost = rabbitmq_vhost.production.name
+
+  policy {
+    pattern  = ".*"
+    priority = 0
+    apply_to = "quorum-queues"
+    definition = jsonencode({"delivery-limit" = 3})
+  }
+}
+```
+
+## AceMQ Take
+
+- Separate infrastructure (VMs, networking) from RabbitMQ configuration (queues, policies) in your IaC. They have different change lifecycles.
+- The Terraform RabbitMQ provider is useful for topology-as-code but requires the management API to be accessible from the Terraform runner — plan your network topology accordingly.
+- For Kubernetes deployments, Terraform provisions the cluster and node pools; the Kubernetes Operator manages RabbitMQ lifecycle. Avoid managing Kubernetes manifests in Terraform `kubernetes_manifest` resources.

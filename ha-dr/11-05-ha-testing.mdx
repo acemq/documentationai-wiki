@@ -1,0 +1,107 @@
+---
+title: HA Testing
+section: 11 — HA & DR
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# HA Testing
+
+## Chaos engineering principles for RabbitMQ
+
+Regularly test failure scenarios in staging to verify:
+1. The cluster survives the failure
+2. Applications reconnect automatically
+3. No messages are lost (with confirms)
+4. Recovery time matches your RTO target
+
+## Test 1: Single node kill
+
+```bash
+# 1. Start a perf-test background load
+java -jar perf-test.jar --uri amqp://rabbit.internal:5672 \
+  --quorum-queue --flag persistent --confirm 100 \
+  --producers 2 --consumers 2 &
+
+# 2. Kill one RabbitMQ node
+ssh node2 "sudo systemctl stop rabbitmq-server"
+
+# 3. Observe:
+# - Perf-test should continue running (brief hiccup during leader election)
+# - Confirm rate should recover within 5-10 seconds
+# - No messages should be lost
+
+# 4. Restart the killed node
+ssh node2 "sudo systemctl start rabbitmq-server"
+
+# 5. Verify node rejoined and quorum is healthy
+rabbitmqctl cluster_status
+```
+
+## Test 2: Network partition simulation
+
+```bash
+# Block traffic between node1 and node2 using iptables
+ssh node1 "sudo iptables -A INPUT -s <node2-ip> -j DROP"
+ssh node1 "sudo iptables -A OUTPUT -d <node2-ip> -j DROP"
+
+# Observe Raft leader election
+# One side (with majority = node1 + node3) should elect a new leader
+
+# Heal the partition
+ssh node1 "sudo iptables -D INPUT -s <node2-ip> -j DROP"
+ssh node1 "sudo iptables -D OUTPUT -d <node2-ip> -j DROP"
+
+# Verify node2 catches up
+rabbitmqctl cluster_status
+```
+
+## Test 3: Memory alarm trigger
+
+```bash
+# Force a memory alarm
+rabbitmqctl set_vm_memory_high_watermark 0.001
+
+# Observe:
+# - Publishers should be blocked
+# - Consumers should continue
+# - Management UI shows memory alarm banner
+
+# Restore
+rabbitmqctl set_vm_memory_high_watermark 0.4
+```
+
+## Test 4: Consumer application restart
+
+```bash
+# Stop all consumer instances
+# Verify:
+# - Messages accumulate in queue (depth increases)
+# - Producer is still running (no flow control)
+
+# Restart consumer instances
+# Verify:
+# - Messages drain from queue
+# - No messages lost (redelivered if auto-ack was off)
+```
+
+## Test results template
+
+```markdown
+## HA Test Results - 2026-06-01
+
+| Test | Result | Recovery time | Messages lost |
+|---|---|---|---|
+| Single node kill | Pass | 8 seconds | 0 |
+| Network partition (1 min) | Pass | 12 seconds | 0 |
+| Memory alarm | Pass | N/A | 0 (blocked) |
+| Consumer restart | Pass | 4 seconds | 0 |
+```
+
+## AceMQ Take
+
+- Run HA tests after every major change (upgrade, topology change, new deployment). Muscle memory for HA behavior is built through regular practice.
+- Track recovery times. A recovery time that degrades over time indicates a configuration drift or capacity issue.
+- Include HA tests in your CI/CD pipeline for staging. Gate production deployments on passing HA tests.

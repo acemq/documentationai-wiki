@@ -1,0 +1,76 @@
+---
+title: OAuth 2.0 / SAML
+section: 06 — Security
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# OAuth 2.0 / SAML
+
+## OAuth 2.0 (JWT) authentication
+
+RabbitMQ 3.13+ supports OAuth 2.0 JWT token authentication via `rabbit_auth_backend_oauth2`.
+
+### Enable the plugin and configure
+
+```bash
+rabbitmq-plugins enable rabbitmq_auth_backend_oauth2
+```
+
+```ini
+# rabbitmq.conf
+auth_backends.1 = rabbit_auth_backend_oauth2
+auth_backends.2 = rabbit_auth_backend_internal
+
+auth_oauth2.resource_server_id = rabbitmq
+auth_oauth2.issuer = https://auth.company.internal/realms/production
+auth_oauth2.jwks_url = https://auth.company.internal/realms/production/protocol/openid-connect/certs
+```
+
+### JWT claim mapping
+
+RabbitMQ extracts permissions from the JWT `scope` claim:
+
+```json
+{
+  "sub": "app-svc",
+  "scope": [
+    "rabbitmq.read:production/*",
+    "rabbitmq.write:production/orders.*",
+    "rabbitmq.configure:production/orders.*"
+  ]
+}
+```
+
+Format: `rabbitmq.<permission>:<vhost>/<resource-pattern>`
+
+### Keycloak integration
+
+```bash
+# Keycloak: create client scope with RabbitMQ permissions
+# Client ID: rabbitmq
+# Scope: rabbitmq.read, rabbitmq.write
+# Mapper: add scope to token as "scope" claim
+```
+
+## SAML for management UI
+
+RabbitMQ supports SAML 2.0 for management UI login:
+
+```bash
+rabbitmq-plugins enable rabbitmq_auth_backend_oauth2 rabbitmq_management
+```
+
+```ini
+management.oauth_enabled = true
+management.oauth_client_id = rabbitmq-management
+management.oauth_provider_url = https://auth.company.internal
+```
+
+## AceMQ Take
+
+- OAuth 2.0 is the preferred authentication method for Kubernetes workloads. Pods receive OIDC tokens from the platform identity provider; no RabbitMQ user management is needed.
+- JWT tokens should have short expiry (1–5 minutes) with automatic refresh. RabbitMQ re-validates the token on each new connection.
+- The management UI SAML integration requires the `rabbitmq_oauth2` plugin. It enables SSO for the web UI without separate user accounts.

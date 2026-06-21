@@ -1,0 +1,88 @@
+---
+title: Kubernetes Deployment
+section: 03 — Architecture
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Kubernetes Deployment
+
+## RabbitMQ Cluster Operator
+
+The recommended way to run RabbitMQ on Kubernetes is via the **RabbitMQ Cluster Operator**:
+
+```bash
+# Install the operator
+kubectl apply -f https://github.com/rabbitmq/cluster-operator/releases/latest/download/cluster-operator.yml
+
+# Deploy a 3-node cluster
+kubectl apply -f - <<'EOF'
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: production
+spec:
+  replicas: 3
+  resources:
+    requests:
+      cpu: 2
+      memory: 4Gi
+    limits:
+      cpu: 4
+      memory: 8Gi
+  persistence:
+    storage: 50Gi
+    storageClassName: fast-nvme
+  rabbitmq:
+    additionalConfig: |
+      cluster_partition_handling = pause_minority
+      vm_memory_high_watermark.relative = 0.6
+EOF
+```
+
+## StatefulSet and PVCs
+
+The operator deploys RabbitMQ as a StatefulSet. Each pod gets a dedicated PVC:
+- Stable pod names: `production-rabbitmq-0`, `production-rabbitmq-1`, etc.
+- PVCs persist across pod restarts and rolling upgrades
+- Pod anti-affinity ensures pods land on different nodes
+
+## Memory watermark in containers
+
+**Critical:** In containers, `/proc/meminfo` reports the **host** total RAM, not the container limit. This means `vm_memory_high_watermark.relative` uses the wrong baseline:
+
+```ini
+# WRONG in containers — reads host RAM, not container limit
+vm_memory_high_watermark.relative = 0.4
+
+# CORRECT — absolute value matching container memory limit
+vm_memory_high_watermark.absolute = 3GB  # for a 4Gi container
+```
+
+Or use the operator's `additionalConfig` to inject this per-cluster.
+
+## Rolling upgrades via operator
+
+```bash
+# Upgrade RabbitMQ version
+kubectl patch rabbitmqcluster production \
+  --type='merge' \
+  -p '{"spec":{"image":"rabbitmq:4.1-management"}}'
+```
+
+The operator performs a rolling upgrade, respecting quorum by upgrading one pod at a time.
+
+## Service topology
+
+The operator creates:
+- `<name>`: ClusterIP Service for AMQP/management (client access)
+- `<name>-headless`: Headless Service for peer discovery (pod-to-pod DNS)
+- `<name>-nodes`: NodePort or LoadBalancer for external access (optional)
+
+## AceMQ Take
+
+- Always use `vm_memory_high_watermark.absolute` in Kubernetes. The relative mode will overcommit or underutilize memory based on incorrect host RAM readings.
+- Schedule RabbitMQ pods with `topologySpreadConstraints` to ensure they land on separate availability zones.
+- Monitor PVC IOPS — many cloud storage classes throttle at low IOPS, which starves the Raft WAL.

@@ -1,0 +1,118 @@
+---
+title: Kubernetes HA
+section: 11 — HA & DR
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Kubernetes HA
+
+## Pod anti-affinity
+
+For HA, RabbitMQ pods must not co-locate on the same Kubernetes node:
+
+```yaml
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: rabbitmq
+spec:
+  replicas: 3
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: rabbitmq
+          topologyKey: kubernetes.io/hostname
+```
+
+For AZ-level distribution:
+
+```yaml
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: rabbitmq
+          topologyKey: topology.kubernetes.io/zone
+```
+
+## PVC storage class
+
+For quorum queues, the storage class must support:
+- `ReadWriteOnce` access mode
+- Low fsync latency (NVMe or provisioned IOPS)
+
+```yaml
+spec:
+  persistence:
+    storageClassName: gp3-high-iops  # custom storage class with NVMe profile
+    storage: 100Gi
+```
+
+## Pod disruption budget
+
+Prevent Kubernetes from draining too many nodes simultaneously:
+
+```yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: rabbitmq-pdb
+spec:
+  maxUnavailable: 1  # never take more than 1 pod offline at once
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+```
+
+The RabbitMQ Cluster Operator creates a PDB automatically. Verify it exists:
+
+```bash
+kubectl get pdb -n messaging
+```
+
+## Topology Operator for quorum queues
+
+Use the Topology Operator to declare queues as Kubernetes resources:
+
+```yaml
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: orders
+spec:
+  name: orders
+  vhost: production
+  type: quorum
+  durable: true
+  arguments:
+    x-delivery-limit: 3
+  rabbitmqClusterReference:
+    name: rabbitmq
+```
+
+## Memory configuration
+
+```yaml
+spec:
+  rabbitmq:
+    additionalConfig: |
+      vm_memory_high_watermark.absolute = 3GB
+      vm_memory_high_watermark_paging_ratio = 0.75
+  resources:
+    limits:
+      memory: 4Gi
+    requests:
+      memory: 4Gi
+```
+
+Always set memory limits equal to requests to prevent OOM kills. Use `vm_memory_high_watermark.absolute` matching your container memory limit.
+
+## AceMQ Take
+
+- The PodDisruptionBudget is your safety net against maintenance-induced quorum loss. Always verify it exists and is configured correctly.
+- Pod anti-affinity with `requiredDuringScheduling` is a hard constraint. If your cluster doesn't have enough nodes/zones, pods will be unschedulable. Use `preferredDuringScheduling` only when you accept the risk.
+- The Topology Operator (queue/exchange/binding as CRDs) is the recommended approach for GitOps-managed RabbitMQ clusters.

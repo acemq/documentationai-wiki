@@ -1,0 +1,88 @@
+---
+title: Slow Confirms
+section: 12 — Troubleshooting
+layer: L3
+audience: [sre, developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Slow Confirms
+
+## Symptoms
+
+- Publisher confirms taking > 20ms p99
+- Application logs show confirm timeout warnings
+- `rabbitmq_channel_messages_unconfirmed` metric growing
+- WAL write latency elevated
+
+## Diagnosis
+
+```bash
+# Check WAL write latency (most common cause)
+rabbitmq-diagnostics erlang_processes_stats
+rabbitmqctl eval 'ra_log_wal:overview().'
+
+# Check unconfirmed message count
+rabbitmqctl list_channels name messages_unconfirmed --formatter pretty_table
+
+# Check disk I/O
+iostat -x 1 10  # on the node with slow confirms
+
+# Check Raft term changes (leadership instability)
+rabbitmqctl list_queues name leader --formatter pretty_table
+```
+
+## Cause 1: WAL I/O latency
+
+```bash
+# Verify WAL disk fdatasync latency
+fio --name=wal-test --ioengine=sync --rw=write --bs=4k \
+    --size=1G --fsync=1 --filename=/var/lib/rabbitmq/test.fio \
+    --iodepth=1 --numjobs=1 --output-format=json 2>/dev/null | \
+    jq '.jobs[0].write.lat_ns.percentile | {p99: .["99.000000"], p999: .["99.900000"]}'
+
+# p99 > 10ms = WAL is your bottleneck
+# Fix: move WAL to faster disk; separate WAL from data disk
+```
+
+## Cause 2: Leader election in progress
+
+```bash
+# Recent Raft term changes
+rabbitmqctl list_queues name effective_policy_definition leader \
+  --formatter pretty_table
+
+# If leader field is empty or changing: election in progress
+# Cause: network instability, node CPU overload, disk I/O saturation
+```
+
+## Cause 3: Flow control / backpressure
+
+```bash
+# Check if publisher channel is in flow control
+rabbitmqctl list_channels name connection flow --formatter pretty_table
+
+# If flow = true, the queue process or broker is applying backpressure
+# Check memory alarm, disk alarm, queue depth
+```
+
+## Cause 4: Network latency to broker
+
+```bash
+# Measure network RTT to broker
+ping rabbitmq.internal
+
+# AMQP confirm round-trip includes:
+# - Client -> broker (network RTT)
+# - WAL fdatasync (disk latency)
+# - Raft replication (2x RTT to followers)
+# - Broker -> client (network RTT)
+# Total: (2 * net RTT) + WAL + Raft round-trip
+```
+
+## AceMQ Take
+
+- Start with WAL latency. It accounts for the majority of confirm latency in quorum queues.
+- If WAL is fast but confirms are slow, check Raft replication: the broker waits for a quorum of followers to acknowledge the log entry before confirming.
+- Confirms to a 3-node quorum queue require at least 2 nodes to acknowledge. If one follower is slow (CPU, disk, network), it delays confirms on the leader.

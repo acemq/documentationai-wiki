@@ -1,0 +1,46 @@
+---
+title: Version Support & Lifecycle
+section: 00 — Start Here
+layer: L3
+audience: [all]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Version Support & Lifecycle
+
+## RabbitMQ version support
+
+| Version | Release | Community EOL | Notes |
+|---|---|---|---|
+| 3.12.x | June 2023 | Dec 2024 | Classic mirrored queues deprecated |
+| 3.13.x | Feb 2024 | Aug 2025 | Khepri opt-in; quorum queues production-ready |
+| 4.0.x | Sep 2024 | Mar 2026 | Classic mirrored removed; Khepri default |
+| 4.1.x | Dec 2024 | Jun 2026 | |
+| 4.2.x | Mar 2025 | Sep 2026 | |
+
+AceMQ provides extended support beyond community EOL for customers on Broadcom/VMware Tanzu RabbitMQ commercial licenses.
+
+## Erlang compatibility
+
+| RabbitMQ | Minimum Erlang | Recommended Erlang |
+|---|---|---|
+| 3.13.x | 26.0 | 26.2+ |
+| 4.0.x | 26.2 | 27.x |
+| 4.1.x | 26.2 | 27.x |
+| 4.2.x | 27.0 | 27.x |
+
+## Upgrade path
+
+RabbitMQ does **not** support skipping minor versions:
+
+```
+3.12 → 3.13 → 4.0 → 4.1 → 4.2
+```
+
+See [Upgrade Strategy](/upgrades/10-01-upgrade-strategy) for the full upgrade guide.
+
+## Related pages
+- [How to Use This KB](/start-here/00-01-how-to-use-this-kb)
+- [Upgrade Strategy](/upgrades/10-01-upgrade-strategy)
+- [Tanzu / Broadcom Licensing](/start-here/00-06-tanzu-broadcom-licensing)

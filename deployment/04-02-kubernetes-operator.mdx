@@ -1,0 +1,103 @@
+---
+title: Kubernetes Operator
+section: 04 — Deployment
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Kubernetes Operator
+
+## Installing the operator
+
+```bash
+# Install from the official release
+kubectl apply -f https://github.com/rabbitmq/cluster-operator/releases/latest/download/cluster-operator.yml
+
+# Verify
+kubectl get pods -n rabbitmq-system
+```
+
+## Minimal production RabbitmqCluster
+
+```yaml
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: production
+  namespace: messaging
+spec:
+  replicas: 3
+  image: rabbitmq:4.1-management
+  resources:
+    requests:
+      cpu: "2"
+      memory: 4Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+  persistence:
+    storage: 100Gi
+    storageClassName: premium-ssd
+  rabbitmq:
+    additionalConfig: |
+      vm_memory_high_watermark.absolute = 3GB
+      cluster_partition_handling = pause_minority
+      heartbeat = 60
+      log.console.level = warning
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: production
+        topologyKey: kubernetes.io/hostname
+```
+
+## Accessing credentials
+
+The operator creates a Secret with credentials:
+
+```bash
+# Get default user credentials
+kubectl get secret production-default-user -o jsonpath='{.data.username}' | base64 -d
+kubectl get secret production-default-user -o jsonpath='{.data.password}' | base64 -d
+```
+
+## Plugins
+
+```yaml
+spec:
+  rabbitmq:
+    additionalPlugins:
+    - rabbitmq_shovel
+    - rabbitmq_shovel_management
+    - rabbitmq_prometheus
+    - rabbitmq_peer_discovery_k8s
+```
+
+## Topology Operator
+
+The companion Topology Operator manages vHosts, users, exchanges, queues, and policies as Kubernetes resources:
+
+```yaml
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: orders
+spec:
+  name: orders
+  vhost: /
+  durable: true
+  arguments:
+    x-queue-type: quorum
+  rabbitmqClusterReference:
+    name: production
+```
+
+## AceMQ Take
+
+- Use `requiredDuringSchedulingIgnoredDuringExecution` pod anti-affinity to guarantee pods land on separate nodes.
+- Do not use `topologyKey: topology.kubernetes.io/zone` for anti-affinity unless you have at least one node per AZ — the scheduler will fail to place pods if it can't satisfy the constraint.
+- The Topology Operator is excellent for GitOps: declare queues, policies, and users in Git and let the operator reconcile.

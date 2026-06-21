@@ -1,0 +1,99 @@
+---
+title: Connection Issues
+section: 12 — Troubleshooting
+layer: L3
+audience: [developer, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Connection Issues
+
+## Symptoms
+
+- Applications cannot connect to RabbitMQ
+- Connections drop and clients reconnect in loops
+- TLS handshake failures
+- Authentication failures
+- Connection count growing unexpectedly
+
+## Diagnosis
+
+```bash
+# Is RabbitMQ accepting connections?
+rabbitmq-diagnostics listeners
+
+# List active connections
+rabbitmqctl list_connections name peer_host user state --formatter pretty_table
+
+# Recent connection events in logs
+grep -E '(connection|access refused|rejected)' /var/log/rabbitmq/rabbit.log | tail -30
+
+# Check port availability
+nc -zv rabbitmq.internal 5671
+curl -k https://rabbitmq.internal:15671/api/overview
+```
+
+## Authentication failures
+
+```bash
+# Log pattern:
+# "access refused for user 'app-svc'"
+
+# Verify credentials
+rabbitmqctl authenticate_user app-svc '<password>'
+
+# Check user exists
+rabbitmqctl list_users
+
+# Check permissions on vHost
+rabbitmqctl list_permissions -p production | grep app-svc
+```
+
+## TLS handshake failures
+
+```bash
+# Test TLS connection
+openssl s_client -connect rabbitmq.internal:5671 \
+  -CAfile /etc/certs/ca.crt \
+  -cert /etc/certs/client.crt \
+  -key /etc/certs/client.key
+
+# Check certificate expiry
+openssl x509 -enddate -noout -in /etc/rabbitmq/certs/server.crt
+
+# Verify TLS version
+openssl s_client -connect rabbitmq.internal:5671 -tls1_2
+```
+
+## Connection churn (too many connections opening/closing)
+
+```bash
+# Monitor connection rate
+watch 'rabbitmqctl list_connections name | wc -l'
+
+# Check for short-lived connections (< 1 second)
+# Look for connections opening and closing in logs
+grep 'closing AMQP connection' /var/log/rabbitmq/rabbit.log | \
+  grep '0.0 seconds' | wc -l
+```
+
+Causes of churn: application creating a new connection per message (instead of pooling), connection timeouts due to heartbeat misconfiguration.
+
+## Heartbeat timeout disconnections
+
+```bash
+# Log pattern:
+# "missed heartbeats from client, timeout: 60s"
+
+# Verify client heartbeat setting matches broker
+rabbitmqctl eval 'application:get_env(rabbit, heartbeat).'
+```
+
+If the client heartbeat is 0 (disabled) and broker is 60, the broker will disconnect the client after missing 2 heartbeats.
+
+## AceMQ Take
+
+- Connection churn is one of the most common connection issues. Check that application code uses connection pooling (one connection per process/thread) before investigating other causes.
+- TLS certificate expiry causes all connections to fail simultaneously. Set calendar alerts for 30 days before expiry.
+- The `blocked_connection_timeout` setting determines how long a publisher waits when the broker is in flow control. Default is `infinity` (waits forever). Set to 300 seconds to detect stalled flows.

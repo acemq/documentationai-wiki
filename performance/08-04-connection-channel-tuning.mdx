@@ -1,0 +1,81 @@
+---
+title: Connection & Channel Tuning
+section: 08 — Performance
+layer: L3
+audience: [sre, developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Connection & Channel Tuning
+
+## Connection limits
+
+```ini
+# rabbitmq.conf
+connection_max = 50000  # global limit (default: infinity)
+
+# Per-vHost limits
+# Set via: rabbitmqctl set_vhost_limits <vhost> '[{"max-connections": 1000}]'
+```
+
+## Heartbeat tuning
+
+```ini
+# rabbitmq.conf
+heartbeat = 60  # seconds (default: 60)
+```
+
+Client-side must match or negotiate a compatible value. Low heartbeat = faster dead connection detection; high = less overhead.
+
+| Heartbeat | Trade-off |
+|---|---|
+| 10s | Fast detection, 2 heartbeat messages/s per connection |
+| 60s | Balanced (recommended) |
+| 0 | Disabled (not recommended in production) |
+
+## TCP buffer tuning
+
+```ini
+# rabbitmq.conf
+tcp_listen_options.backlog = 4096
+tcp_listen_options.sndbuf  = 196608
+tcp_listen_options.recbuf  = 196608
+tcp_listen_options.nodelay = true
+tcp_listen_options.exit_on_close = false
+tcp_listen_options.keepalive = true
+```
+
+## Erlang process limit
+
+Each connection, channel, and queue is an Erlang process. The default limit is 1,048,576:
+
+```bash
+# Check current usage
+rabbitmqctl eval 'erlang:system_info(process_count).'
+rabbitmqctl eval 'erlang:system_info(process_limit).'
+```
+
+If process count > 80% of process limit, increase it in the environment:
+
+```bash
+# rabbitmq-env.conf
+SERVER_ERL_ARGS="+P 2097152"
+```
+
+## Channel flow control
+
+Channels can be in flow control when the broker is under memory or CPU pressure:
+
+```bash
+# Check for flow-controlled channels
+rabbitmqctl list_channels name connection flow --formatter pretty_table
+```
+
+Persistent channel flow usually indicates consumer lag or memory pressure — fix the root cause.
+
+## AceMQ Take
+
+- The most common performance mistake: too many connections from too many threads, each with too few channels. Measure connection count; if it's > 1,000, investigate whether connection pooling is working.
+- Set `nodelay = true` always. Nagle's algorithm adds latency for small AMQP frames.
+- Monitor Erlang process count. At 80% of the limit, queue declarations and new connections start failing.

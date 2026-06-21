@@ -1,0 +1,90 @@
+---
+title: Connections & Channels
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Connections & Channels
+
+## The connection model
+
+AMQP 0-9-1 multiplexes **channels** over a single TCP **connection**:
+
+```
+One TCP connection per application process
+  ├─ Channel 1 ─ publisher
+  ├─ Channel 2 ─ consumer 1
+  └─ Channel 3 ─ consumer 2
+```
+
+**Each channel is independent.** A channel-level error (404 queue not found, 403 permission denied) closes only that channel, not the connection.
+
+## Anti-patterns
+
+| Anti-pattern | Problem | Fix |
+|---|---|---|
+| One connection per message | Connection churn, port exhaustion | Connection pool |
+| Sharing a channel across threads | Channels are not thread-safe | One channel per thread |
+| One channel per message | Channel overhead; flow control per-channel | Reuse channels |
+| Mixing publish and consume on same channel | Flow control interaction | Separate channels for pub and sub |
+
+## Connection pool pattern
+
+```python
+import pika
+from contextlib import contextmanager
+from threading import local
+
+_thread_local = local()
+
+def get_channel():
+    if not hasattr(_thread_local, 'connection') or _thread_local.connection.is_closed:
+        _thread_local.connection = pika.BlockingConnection(
+            pika.ConnectionParameters(
+                host="rabbitmq",
+                heartbeat=60,
+                blocked_connection_timeout=300
+            )
+        )
+    if not hasattr(_thread_local, 'channel') or _thread_local.channel.is_closed:
+        _thread_local.channel = _thread_local.connection.channel()
+    return _thread_local.channel
+```
+
+## Heartbeat configuration
+
+```ini
+# rabbitmq.conf
+heartbeat = 60  # broker-side
+```
+
+```python
+# Client-side (must negotiate with broker)
+pika.ConnectionParameters(heartbeat=60)
+```
+
+Heartbeats detect dead TCP connections. Without them, a client can hold a connection open indefinitely after a network failure — accumulating unacked messages and blocking flow control.
+
+## Reconnection with backoff
+
+```python
+import time
+
+def connect_with_retry(max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            return pika.BlockingConnection(params)
+        except pika.exceptions.AMQPConnectionError:
+            wait = min(2 ** attempt, 30)  # exponential backoff, max 30s
+            time.sleep(wait)
+    raise RuntimeError("Could not connect to RabbitMQ")
+```
+
+## AceMQ Take
+
+- One connection per process (or per thread if using a pool). Not one per request.
+- Always set `heartbeat`. A missing heartbeat causes zombie connections that hold resources indefinitely.
+- Use separate channels for publishing and consuming. Flow control applied to one channel does not affect the other.

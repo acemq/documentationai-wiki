@@ -1,0 +1,40 @@
+---
+title: Protocols Compared
+section: 01 — Core Concepts
+layer: L2
+audience: [developer, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Protocols Compared
+
+🐇 **Upstream reference:** [RabbitMQ Protocols](https://www.rabbitmq.com/docs/protocols)
+
+## Protocol summary
+
+| Protocol | Port | Best for | Limitations |
+|---|---|---|---|
+| **AMQP 0-9-1** | 5672 (5671 TLS) | General messaging, task queues, microservices | RabbitMQ-specific semantics; not a broad ecosystem |
+| **AMQP 1.0** | 5672 (5671 TLS) | Interop with Azure Service Bus, ActiveMQ, Solace | Limited RabbitMQ-specific feature support |
+| **MQTT 3.1/5.0** | 1883 (8883 TLS) | IoT devices, constrained clients | No message ordering guarantees; limited routing |
+| **STOMP** | 61613 (61614 TLS) | Browser WebSocket clients, simple integrations | Text-based; higher overhead |
+| **Streams (custom)** | 5552 (5551 TLS) | High-throughput replay, event sourcing | Requires dedicated stream client library |
+
+## When to use each
+
+**AMQP 0-9-1** — Default choice for all server-side services. Full exchange/routing semantics, publisher confirms, manual acks, prefetch control.
+
+**AMQP 1.0** — When integrating with non-RabbitMQ brokers or cloud services (Azure Service Bus, Amazon MQ for ActiveMQ). The protocol is broker-agnostic.
+
+**MQTT** — IoT sensors, mobile clients with unreliable connectivity. QoS levels 0/1/2 map roughly to at-most-once / at-least-once / exactly-once (RabbitMQ implements QoS 1 reliably; QoS 2 is supported but expensive).
+
+**STOMP** — WebSocket browser clients (STOMP over WebSocket). Simple text framing makes it easy to implement without a dedicated library.
+
+**Streams** — When you need Kafka-like replay semantics: multiple independent consumers reading at different offsets, large fan-out, time-based retention. Requires stream-capable client (Java `rabbitmq-stream-java-client`, Go `rabbitmq-stream-go-client`).
+
+## AceMQ Take
+
+- Don't mix AMQP 0-9-1 and AMQP 1.0 on the same vHost without understanding the routing semantic differences.
+- Enable the relevant protocol plugins explicitly: `rabbitmq-plugins enable rabbitmq_mqtt rabbitmq_stomp`.
+- MQTT QoS 2 over RabbitMQ is correct but expensive (4 broker round-trips per message). Use QoS 1 + idempotent consumers in practice.

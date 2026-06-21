@@ -1,0 +1,75 @@
+---
+title: Stream Queues
+section: 02 — Queue Types
+layer: L2
+audience: [developer, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Stream Queues
+
+🐇 **Upstream reference:** [Streams](https://www.rabbitmq.com/docs/streams)
+
+## What is a stream?
+
+A stream is an append-only, log-based queue where:
+- Messages are **never deleted on consume** — consumers read at offsets
+- Multiple independent consumer groups can read from the same stream at different positions
+- Retention is time-based, byte-based, or both
+
+This is fundamentally different from classic/quorum queues where a message is consumed once.
+
+## Declaring a stream
+
+```python
+channel.queue_declare(
+    queue="audit-events",
+    durable=True,
+    arguments={
+        "x-queue-type": "stream",
+        "x-max-length-bytes": 10_000_000_000,  # 10 GB
+        "x-stream-max-segment-size-bytes": 500_000_000,  # 500 MB segments
+    }
+)
+```
+
+## Consuming from a stream
+
+Streams require the `rabbitmq_stream` protocol or the `x-stream-offset` argument via AMQP:
+
+```python
+# AMQP consumer with offset (reads from beginning)
+channel.basic_consume(
+    queue="audit-events",
+    on_message_callback=callback,
+    arguments={"x-stream-offset": "first"}
+)
+```
+
+Offset values: `"first"`, `"last"`, `"next"`, a specific offset number, or a timestamp.
+
+## Retention
+
+```bash
+# Set retention via policy
+rabbitmqctl set_policy stream-retention "^stream\." \
+  '{"max-length-bytes": 10737418240, "stream-max-segment-size-bytes": 524288000}' \
+  --apply-to streams
+```
+
+## When to use streams vs quorum queues
+
+| Need | Stream | Quorum |
+|---|---|---|
+| Message replay | ✅ | ❌ |
+| Multiple independent consumers | ✅ | ❌ (competing) |
+| Fan-out without binding copies | ✅ | ❌ |
+| Low-latency task queue | ❌ | ✅ |
+| DLX / routing | ❌ | ✅ |
+| Standard AMQP consumers | Limited | ✅ |
+
+## AceMQ Take
+
+- Use the dedicated stream protocol client (`rabbitmq-stream-java-client`, etc.) for production stream consumers — it supports automatic offset tracking and parallel segment reads.
+- Streams don't support DLX. Design your error handling at the application level (process and commit offset, or skip with logging).

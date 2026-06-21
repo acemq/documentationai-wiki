@@ -1,0 +1,109 @@
+---
+title: Python / pika
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Python / pika
+
+## Installation
+
+```bash
+pip install pika
+```
+
+## Connection
+
+```python
+import pika
+import ssl
+
+ssl_context = ssl.create_default_context()
+ssl_context.load_verify_locations('/etc/certs/ca.crt')
+
+params = pika.ConnectionParameters(
+    host="rabbitmq.internal",
+    port=5671,
+    virtual_host="production",
+    credentials=pika.PlainCredentials("app-svc", "<password>"),
+    ssl_options=pika.SSLOptions(ssl_context),
+    heartbeat=60,
+    blocked_connection_timeout=300
+)
+
+connection = pika.BlockingConnection(params)
+channel = connection.channel()
+```
+
+## Publishing with confirms
+
+```python
+channel.confirm_delivery()
+
+props = pika.BasicProperties(
+    content_type="application/json",
+    delivery_mode=2,  # persistent
+    message_id=str(uuid.uuid4())
+)
+
+try:
+    channel.basic_publish(
+        exchange="orders",
+        routing_key="order.created",
+        body=json.dumps(event).encode(),
+        properties=props
+    )
+except pika.exceptions.UnroutableError:
+    logger.error("Message unroutable")
+except pika.exceptions.NackError:
+    logger.error("Message nacked — retry")
+```
+
+## Async consumer with SelectConnection
+
+```python
+import pika
+
+class Consumer:
+    def __init__(self, amqp_url):
+        self._connection = None
+        self._channel = None
+        self._url = amqp_url
+
+    def connect(self):
+        return pika.SelectConnection(
+            pika.URLParameters(self._url),
+            on_open_callback=self.on_connected
+        )
+
+    def on_connected(self, connection):
+        connection.channel(on_open_callback=self.on_channel_open)
+
+    def on_channel_open(self, channel):
+        self._channel = channel
+        channel.basic_qos(prefetch_count=20)
+        channel.basic_consume("orders", self.on_message)
+
+    def on_message(self, ch, method, properties, body):
+        try:
+            process(body)
+            ch.basic_ack(method.delivery_tag)
+        except Exception:
+            ch.basic_nack(method.delivery_tag, requeue=False)
+
+    def run(self):
+        self._connection = self.connect()
+        self._connection.ioloop.start()
+```
+
+## AceMQ Take
+
+- For production consumers, use `SelectConnection` (async) or `BlockingConnection` in a dedicated thread. Never use `BlockingConnection` in an async framework (FastAPI, asyncio) without thread isolation.
+- For asyncio applications, use `aio-pika` instead of `pika` directly:
+  ```bash
+  pip install aio-pika
+  ```
+- `BlockingConnection` will drop heartbeats if your message processing blocks the thread for > `heartbeat` seconds. Keep processing fast or use `SelectConnection`.

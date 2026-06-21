@@ -1,0 +1,76 @@
+---
+title: Day-Two Operations
+section: 09 — Operations
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Day-Two Operations
+
+## Daily operational checks
+
+```bash
+# Cluster health
+rabbitmq-diagnostics check_local_alarms
+rabbitmq-diagnostics cluster_status
+
+# Queue depth (critical queues)
+rabbitmqctl list_queues name messages consumers --formatter pretty_table | \
+  sort -k2 -rn | head -20
+
+# Check for zero-consumer queues
+rabbitmqctl list_queues name messages consumers | awk '$3 == 0 && $2 > 0'
+
+# Leader distribution for quorum queues
+rabbitmqctl list_queues name type leader | grep quorum | sort -k3
+```
+
+## Weekly operational tasks
+
+- Review queue depth trends in Grafana (7-day view)
+- Check certificate expiry (`openssl x509 -enddate -noout -in /etc/rabbitmq/certs/server.crt`)
+- Review slow consumer alerts
+- Check Raft WAL disk usage
+- Rebalance quorum queue leaders if unevenly distributed
+
+## Monthly operational tasks
+
+- Rotate service account passwords (or verify automated rotation is working)
+- Review vHost resource limits vs. actual usage
+- Capacity planning review (message volume trends, disk growth)
+- Test backup restore procedure
+- Review security checklist against current config
+
+## Queue cleanup
+
+```bash
+# List queues with no consumers and messages accumulating
+rabbitmqctl list_queues name messages consumers state | awk '$3 == 0 && $2 > 100'
+
+# Purge a specific queue (removes all messages without delivering)
+rabbitmqctl purge_queue --vhost production orders.retry
+
+# Delete idle queue (auto-delete queues handle this automatically)
+rabbitmqctl delete_queue --vhost production abandoned.queue
+```
+
+## Policy management
+
+```bash
+# List all policies
+rabbitmqctl list_policies --formatter pretty_table
+
+# List effective policy per queue
+rabbitmqctl list_queues name effective_policy_definition --formatter pretty_table
+
+# Remove outdated policy
+rabbitmqctl clear_policy -p production old-ttl-policy
+```
+
+## AceMQ Take
+
+- Zero-consumer queues with growing depth are your highest-priority operational alert. Messages accumulate silently until the alarm goes off.
+- Run leader rebalance after every node restart or rolling upgrade. Leaders drift to the last restarted node.
+- Treat the weekly certificate check as non-negotiable. A lapsed certificate causes simultaneous connection failure across all clients.

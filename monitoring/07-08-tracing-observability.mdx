@@ -1,0 +1,95 @@
+---
+title: Tracing & Observability
+section: 07 — Monitoring
+layer: L3
+audience: [developer, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Tracing & Observability
+
+## Message-level tracing
+
+RabbitMQ has a built-in tracer that publishes trace events to a dedicated exchange:
+
+```bash
+# Enable tracing on a vHost
+rabbitmqctl trace_on -p production
+
+# Trace events are published to amq.rabbitmq.trace
+# with routing keys: publish.<exchange> and deliver.<queue>
+
+# Disable tracing (always do this in production after debugging)
+rabbitmqctl trace_off -p production
+```
+
+**Warning:** Message tracing has significant performance overhead. Enable only for short debugging sessions, never in steady-state production.
+
+## Firehose plugin
+
+The Firehose plugin copies every published/delivered message to `amq.rabbitmq.trace` for inspection:
+
+```bash
+rabbitmq-plugins enable rabbitmq_tracing
+```
+
+In the management UI: Admin > Tracing > Add Trace
+
+## Distributed tracing with OpenTelemetry
+
+Propagate trace context through RabbitMQ messages via AMQP headers:
+
+```python
+from opentelemetry import trace
+from opentelemetry.propagate import inject
+
+tracer = trace.get_tracer(__name__)
+
+def publish_with_trace(channel, exchange, routing_key, body):
+    with tracer.start_as_current_span("rabbitmq.publish") as span:
+        headers = {}
+        inject(headers)  # adds traceparent, tracestate
+
+        props = pika.BasicProperties(
+            headers=headers,
+            delivery_mode=2
+        )
+        channel.basic_publish(exchange, routing_key, body, props)
+```
+
+```python
+from opentelemetry.propagate import extract
+
+def consume_with_trace(ch, method, properties, body):
+    ctx = extract(properties.headers or {})
+    with tracer.start_as_current_span(
+        "rabbitmq.consume",
+        context=ctx
+    ):
+        process(body)
+        ch.basic_ack(method.delivery_tag)
+```
+
+## Correlation IDs
+
+For simpler tracing without OTel:
+
+```python
+# Publisher: set correlation_id
+props = pika.BasicProperties(
+    message_id=str(uuid.uuid4()),
+    correlation_id=incoming_request_id,  # thread the request ID through
+    delivery_mode=2
+)
+
+# Consumer: log with correlation_id
+logger.info("Processing message",
+    extra={"correlation_id": properties.correlation_id})
+```
+
+## AceMQ Take
+
+- Propagate trace context (OTel `traceparent` or a `correlation_id` header) through all messages. This is the minimum viable observability for async systems.
+- The built-in RabbitMQ tracer is for debugging only. In production, use AMQP header propagation with your distributed tracing system.
+- Log the `correlation_id` on every consumer. When a customer reports a failed order, the correlation ID is your thread through the system.

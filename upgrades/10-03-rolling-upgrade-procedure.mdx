@@ -1,0 +1,94 @@
+---
+title: Rolling Upgrade Procedure
+section: 10 — Upgrades
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Rolling Upgrade Procedure
+
+## Prerequisites
+
+- Pre-upgrade checklist complete
+- Definitions backed up
+- Cluster healthy (all nodes up, no alarms)
+- Maintenance window open
+
+## Step-by-step procedure
+
+### For each node (one at a time):
+
+```bash
+# Step 1: Verify current state
+rabbitmqctl -n rabbit@<node> cluster_status
+rabbitmq-diagnostics -n rabbit@<node> check_local_alarms
+rabbitmq-diagnostics -n rabbit@<node> check_if_node_is_quorum_critical
+# If quorum critical, stop here. Find and fix the issue first.
+
+# Step 2: Drain application connections (optional but recommended)
+# Scale down application deployments targeting this node
+
+# Step 3: Stop RabbitMQ
+sudo rabbitmqctl stop_app
+sudo systemctl stop rabbitmq-server
+
+# Step 4: Update packages
+# Debian/Ubuntu:
+sudo apt-get install rabbitmq-server=<target-version>
+# RHEL/CentOS:
+sudo yum install rabbitmq-server-<target-version>
+# Docker: update image tag in docker-compose.yml or Kubernetes manifest
+
+# Step 5: Start RabbitMQ
+sudo systemctl start rabbitmq-server
+
+# Step 6: Wait for node to rejoin cluster
+until rabbitmqctl ping 2>/dev/null; do sleep 5; done
+
+# Step 7: Verify the upgraded node
+rabbitmqctl version  # should show new version
+rabbitmqctl cluster_status  # cluster should be intact
+rabbitmq-diagnostics check_local_alarms
+
+# Step 8: Wait for quorum recovery (30-60 seconds)
+sleep 60
+
+# Step 9: Move to next node
+```
+
+## Verify after all nodes upgraded
+
+```bash
+# All nodes on new version
+rabbitmqctl cluster_status | grep running_nodes
+
+# Rebalance quorum queue leaders
+rabbitmq-queues rebalance quorum
+
+# Run integration tests
+# Monitor for 30 minutes
+```
+
+## Kubernetes rolling upgrade
+
+```bash
+# Update the image tag in the RabbitmqCluster CR
+kubectl patch rabbitmqcluster rabbitmq \
+  -p '{"spec":{"image":"rabbitmq:4.2-management"}}' \
+  --type merge
+
+# The operator handles the rolling restart
+# Monitor the rollout
+kubectl rollout status statefulset rabbitmq-server
+
+# After upgrade
+kubectl exec rabbitmq-server-0 -- rabbitmqctl version
+```
+
+## AceMQ Take
+
+- Never rush between nodes. After restarting a node, wait for it to fully rejoin and for Raft logs to catch up before touching the next node. 30–60 seconds minimum; more under load.
+- If the upgrade fails mid-way (e.g., node won't start), you have a mixed-version cluster. This is usually safe for one step but don't leave it. Resolve before continuing.
+- The `check_if_node_is_quorum_critical` check before each node stop has saved countless incidents. Never skip it.

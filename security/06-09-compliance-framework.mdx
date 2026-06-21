@@ -1,0 +1,68 @@
+---
+title: Compliance Framework
+section: 06 — Security
+layer: L3
+audience: [architect, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Compliance Framework
+
+## PCI DSS
+
+For organizations processing payment card data:
+
+| Requirement | RabbitMQ control |
+|---|---|
+| 6.4: Protect data in transit | TLS 1.2+ on all AMQP connections |
+| 7.1: Restrict access | Per-vHost, per-resource permissions |
+| 8.2: Unique credentials | No shared service accounts |
+| 10.2: Audit logging | Ship logs to SIEM; 12-month retention |
+| 10.5: Log integrity | SIEM tamper protection |
+| 11.5: File integrity | Monitor rabbitmq.conf for unauthorized changes |
+
+**Key requirement:** Card data must never be stored in message queues. Queues can carry payment references (order IDs, tokens) but not PANs or CVVs.
+
+## HIPAA
+
+For healthcare workloads transmitting PHI:
+
+| Requirement | RabbitMQ control |
+|---|---|
+| Administrative safeguards | Document RabbitMQ in system inventory |
+| Technical safeguards | TLS encryption, access controls |
+| Audit controls | All access logged and retained 6+ years |
+| Transmission security | Mutual TLS for all inter-service messaging |
+
+## SOC 2 Type II
+
+| Trust criteria | RabbitMQ control |
+|---|---|
+| Availability | 3-node cluster, HA runbook, RTO < 1h |
+| Confidentiality | TLS, least-privilege access, vHost isolation |
+| Security | Security checklist, audit logging, SIEM |
+| Change management | IaC for all config changes, PR review |
+
+## Evidence collection
+
+For compliance audits, collect:
+
+```bash
+# User and permission inventory
+rabbitmqctl list_users --formatter json > users.json
+for vh in $(rabbitmqctl list_vhosts -q); do
+  rabbitmqctl list_permissions -p "$vh" --formatter json >> permissions.json
+done
+
+# TLS configuration
+rabbitmq-diagnostics listeners --formatter json > listeners.json
+
+# Connection log (last 30 days from SIEM)
+```
+
+## AceMQ Take
+
+- Compliance requirements cascade to your messaging layer. If your application handles PCI, PHI, or PII, your RabbitMQ deployment inherits those requirements.
+- The most common compliance finding in messaging systems: plaintext credentials in config files or environment variables. Use secrets management.
+- Document the RabbitMQ security configuration in a System Security Plan (SSP) or equivalent. Auditors will ask for it.

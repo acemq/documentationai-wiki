@@ -1,0 +1,72 @@
+---
+title: HA Patterns
+section: 11 — HA & DR
+layer: L3
+audience: [architect, sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# HA Patterns
+
+## HA with quorum queues (4.x)
+
+In RabbitMQ 4.x, quorum queues are the primary HA mechanism. They use Raft to replicate messages across nodes, providing automatic failover without configuration:
+
+```bash
+# Quorum queue replication factor
+rabbitmqctl set_policy quorum-queues ".*" \
+  '{"x-queue-type": "quorum"}' \
+  --apply-to queues
+
+# Or declare explicitly:
+# x-queue-type: quorum
+# x-quorum-initial-group-size: 3
+```
+
+**Failure scenarios:**
+- 1 node down in 3-node cluster: fully operational
+- 2 nodes down in 3-node cluster: reads only, no publishes
+- 1 node down in 5-node cluster: fully operational
+- 2 nodes down in 5-node cluster: fully operational
+
+## HA topology options
+
+| Topology | Protection | Complexity | Cost |
+|---|---|---|---|
+| 3-node single-AZ | Node failure | Low | Low |
+| 3-node multi-AZ | Node + AZ failure | Medium | Medium |
+| 5-node multi-AZ | 2 node + AZ failure | Medium | Higher |
+| Separate clusters + Shovel | Region failure | High | High |
+
+## Multi-AZ cluster (recommended for production)
+
+```
+AZ-1       AZ-2       AZ-3
+nodeA      nodeB      nodeC
+  \          |          /
+   \         |         /
+    +----cluster----+
+
+Quorum queue: leaders and followers spread across AZs
+```
+
+For a 3-node multi-AZ cluster, losing any single AZ leaves 2 nodes which maintain quorum.
+
+## Load balancer configuration for HA
+
+```
+Clients → L4 TCP Load Balancer → RabbitMQ nodes
+
+Health check: rabbitmq-diagnostics ping
+Session persistence: none (AMQP clients reconnect)
+Algorithm: round-robin or least-connections
+```
+
+Do not use L7 (HTTP) load balancing for AMQP 0-9-1 connections. The AMQP handshake is connection-oriented; L7 termination breaks it.
+
+## AceMQ Take
+
+- Quorum queues make `pause_minority` and other partition-handling strategies unnecessary for 4.x. The Raft-based design handles partitions correctly by design.
+- For a new cluster, start with 3 nodes across 3 AZs. This gives AZ-level HA without the operational overhead of 5-node clusters.
+- Never run a 2-node cluster in production. It cannot tolerate any node failure (0 failures allowed; losing 1 of 2 breaks majority).

@@ -1,0 +1,94 @@
+---
+title: .NET Client
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# .NET Client (RabbitMQ.Client)
+
+## Package
+
+```bash
+dotnet add package RabbitMQ.Client
+```
+
+## Connection and channel
+
+```csharp
+var factory = new ConnectionFactory
+{
+    HostName = "rabbitmq.internal",
+    Port = 5671,
+    UserName = "app-svc",
+    Password = Environment.GetEnvironmentVariable("RABBITMQ_PASSWORD"),
+    VirtualHost = "production",
+    Ssl = new SslOption { Enabled = true, ServerName = "rabbitmq.internal" },
+    RequestedHeartbeat = TimeSpan.FromSeconds(60),
+    AutomaticRecoveryEnabled = true,
+    NetworkRecoveryInterval = TimeSpan.FromSeconds(5)
+};
+
+using var connection = factory.CreateConnection();
+using var channel = connection.CreateModel();
+```
+
+## Publisher confirms
+
+```csharp
+channel.ConfirmSelect();
+
+var props = channel.CreateBasicProperties();
+props.ContentType = "application/json";
+props.DeliveryMode = 2; // persistent
+props.MessageId = Guid.NewGuid().ToString();
+
+channel.BasicPublish(
+    exchange: "orders",
+    routingKey: "order.created",
+    basicProperties: props,
+    body: Encoding.UTF8.GetBytes(JsonSerializer.Serialize(order))
+);
+
+if (!channel.WaitForConfirms(TimeSpan.FromSeconds(5)))
+    throw new Exception("Publish not confirmed");
+```
+
+## Consumer with manual ack
+
+```csharp
+channel.BasicQos(0, prefetchCount: 20, global: false);
+
+var consumer = new EventingBasicConsumer(channel);
+consumer.Received += (model, ea) =>
+{
+    var body = ea.Body.ToArray();
+    try
+    {
+        ProcessMessage(body);
+        channel.BasicAck(ea.DeliveryTag, multiple: false);
+    }
+    catch (RetryableException)
+    {
+        channel.BasicNack(ea.DeliveryTag, multiple: false, requeue: true);
+    }
+    catch
+    {
+        channel.BasicNack(ea.DeliveryTag, multiple: false, requeue: false);
+    }
+};
+
+channel.BasicConsume(queue: "orders", autoAck: false, consumer: consumer);
+```
+
+## Automatic recovery
+
+Set `AutomaticRecoveryEnabled = true` on the factory. The client will automatically reconnect and re-declare exchanges/queues on connection failure. Note: `EventingBasicConsumer` references must be re-registered after recovery.
+
+## AceMQ Take
+
+- Enable `AutomaticRecoveryEnabled`. Without it, a transient network blip leaves your application disconnected until restart.
+- Use `IModel` (channel) per thread. The `RabbitMQ.Client` channel is not thread-safe.
+- For high-throughput scenarios, consider the async consumer (`AsyncEventingBasicConsumer`) which allows async message processing without blocking the consumer thread.

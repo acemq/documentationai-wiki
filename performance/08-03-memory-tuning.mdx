@@ -1,0 +1,81 @@
+---
+title: Memory Tuning
+section: 08 — Performance
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Memory Tuning
+
+## Memory consumers
+
+```bash
+rabbitmq-diagnostics memory_breakdown
+```
+
+Typical breakdown in a loaded broker:
+
+| Component | Typical share |
+|---|---|
+| Queue process memory | 30–60% |
+| Binary data (message bodies) | 20–40% |
+| Connections + channels | 5–20% |
+| Erlang VM + OS | 5–10% |
+
+## Watermark configuration
+
+```ini
+# rabbitmq.conf
+
+# Relative: fraction of detected RAM (DO NOT use in containers)
+vm_memory_high_watermark.relative = 0.4
+
+# Absolute: explicit byte limit (use in containers)
+vm_memory_high_watermark.absolute = 3GB
+
+# Paging starts at this fraction of the watermark
+vm_memory_high_watermark_paging_ratio = 0.75
+```
+
+## Tuning for large in-memory queues
+
+If queues legitimately hold large message backlogs in memory:
+
+```ini
+# Increase watermark (with adequate RAM)
+vm_memory_high_watermark.absolute = 24GB  # on 32 GB node
+
+# Enable lazy queues (now default for classic in 4.x)
+# Messages paged to disk proactively
+```
+
+## Connection memory overhead
+
+Each connection consumes approximately:
+- AMQP connection: ~80–150 KB
+- Channel: ~12 KB
+- Consumer: ~16 KB
+
+For 10,000 connections: ~1.5 GB. Plan for this in sizing.
+
+## Binary memory and GC
+
+RabbitMQ uses Erlang's reference-counted binaries for message bodies. Large binaries (> 64 bytes) are stored in a shared heap and garbage-collected lazily.
+
+If binary memory is growing:
+
+```bash
+# Force GC on all processes (brief pause)
+rabbitmqctl eval 'erlang:garbage_collect().'
+
+# Check binary memory
+rabbitmqctl eval 'erlang:memory(binary).'
+```
+
+## AceMQ Take
+
+- The watermark is your primary lever. Set it based on measured steady-state usage + 30% headroom, leaving room for GC and bursts.
+- In containers: always use `vm_memory_high_watermark.absolute`. The relative mode reads host RAM from `/proc/meminfo` and can set the watermark 10× higher than the container's actual limit.
+- Monitor binary memory separately. Sustained binary memory growth that doesn't decrease is a sign of message body accumulation or a consumer backlog.

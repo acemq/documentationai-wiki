@@ -1,0 +1,69 @@
+---
+title: Multi-DC Architecture
+section: 03 — Architecture
+layer: L3
+audience: [architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Multi-DC Architecture
+
+## The problem with spanning a cluster across DCs
+
+RabbitMQ clusters use Raft for quorum queues, which requires low-latency communication between quorum members. Spanning a single cluster across DCs with > 50ms round-trip latency causes:
+- Slow publisher confirms (every confirm requires a Raft round-trip)
+- Frequent leadership elections
+- WAL write timeouts
+
+**General rule: do not span a single RabbitMQ cluster across more than one data center unless the DC-to-DC latency is < 10ms.**
+
+## Option 1: Federation (active-active)
+
+Federation links exchanges or queues between independent clusters:
+
+```bash
+# On DC-B cluster: federate from DC-A
+rabbitmqctl set_parameter federation-upstream dc-a \
+  '{"uri": "amqp://user:pass@dc-a.internal:5671", "prefetch-count": 100}'
+
+rabbitmqctl set_policy federate-events "^events\." \
+  '{"federation-upstream-set": "all"}' --apply-to exchanges
+```
+
+**Use case:** Messages published in DC-A are also available in DC-B. Consumers in each DC read local messages.
+
+## Option 2: Shovel (active-passive DR)
+
+Shovel moves messages from a source queue to a destination exchange:
+
+```bash
+rabbitmqctl set_parameter shovel dc-a-to-dc-b \
+  '{"src-protocol": "amqp091",
+    "src-uri": "amqp://dc-a.internal:5671",
+    "src-queue": "critical.events",
+    "dest-protocol": "amqp091",
+    "dest-uri": "amqp://dc-b.internal:5671",
+    "dest-exchange": "critical.events"}'
+```
+
+**Use case:** Replicate critical events to a standby DC. If DC-A goes down, consumers fail over to DC-B.
+
+## Option 3: Separate clusters, application-level routing
+
+For highest isolation: run independent clusters per DC, let the application choose which cluster to publish/consume from based on routing logic.
+
+## DC topology decision matrix
+
+| Need | Architecture |
+|---|---|
+| Active-active, same data in all DCs | Federation |
+| Active-passive DR failover | Shovel |
+| Complete isolation, app-managed routing | Separate clusters |
+| Low-latency DC link (< 10ms) | Single stretched cluster |
+
+## AceMQ Take
+
+- Federation is eventually consistent — messages arrive in DC-B after a lag. Design consumers to tolerate out-of-order delivery.
+- Shovel with `ack-mode: on-confirm` provides at-least-once delivery across DCs. The default `no-ack` is faster but risks loss on shovel restart.
+- Monitor shovel link state: `rabbitmqctl shovel_status` — a stuck link means messages are accumulating on the source.

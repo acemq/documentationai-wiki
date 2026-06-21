@@ -1,0 +1,45 @@
+---
+title: How to Use This KB
+section: 00 — Start Here
+layer: L3
+audience: [all]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# How to Use This KB
+
+## Three-layer model
+
+Every page in this knowledge base is tagged with one of three layers:
+
+| Layer | Badge | What it is |
+|---|---|---|
+| L1 | 🐇 Upstream Reference | Content sourced directly from RabbitMQ's official documentation, attributed and lightly annotated. |
+| L2 | ⭐ AceMQ Insight | AceMQ-authored overlay on an upstream topic. Starts with a reference to the L1 source, adds operational notes, production traps, and AceMQ-specific recommendations. |
+| L3 | 🔒 AceMQ Exclusive | Content with no direct upstream equivalent. AceMQ-proprietary guides, checklists, decision frameworks, and runbooks. |
+
+## How to navigate
+
+**New to RabbitMQ?** Start with [Quick Start by Role](/start-here/00-03-quick-start-by-role) to find the 5-page reading path for your role.
+
+**Evaluating queue types?** Go directly to [Queue Type Decision Guide](/queue-types/02-01-queue-type-decision).
+
+**Troubleshooting a live incident?** Go to [Troubleshooting Index](/troubleshooting/12-00-troubleshooting-index) and match your symptom to a runbook.
+
+**Planning an upgrade?** Start at [Upgrade Strategy](/upgrades/10-01-upgrade-strategy).
+
+## Version scope
+
+This KB covers RabbitMQ **3.13 through 4.2**. Where behavior differs between versions, pages note the version explicitly.
+
+Key version boundaries covered:
+- **3.12**: Classic mirrored queues deprecated
+- **3.13**: Quorum queues production-ready; Khepri opt-in
+- **4.0**: Classic mirrored queues removed; Khepri default
+- **4.1–4.2**: Stability and performance improvements
+
+## Related pages
+- [Version Support & Lifecycle](/start-here/00-02-version-support-lifecycle)
+- [Quick Start by Role](/start-here/00-03-quick-start-by-role)
+- [Glossary](/start-here/00-05-glossary)

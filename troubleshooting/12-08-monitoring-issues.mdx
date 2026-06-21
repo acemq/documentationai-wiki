@@ -1,0 +1,97 @@
+---
+title: Monitoring Issues
+section: 12 — Troubleshooting
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Monitoring Issues
+
+## Prometheus endpoint not responding
+
+```bash
+# Verify plugin is enabled
+rabbitmq-plugins list | grep prometheus
+# Should show: [E*] rabbitmq_prometheus
+
+# Test endpoint directly
+curl http://rabbitmq.internal:15692/metrics | head -20
+
+# If plugin is enabled but endpoint is unreachable:
+rabbitmq-diagnostics listeners | grep 15692
+```
+
+## Metrics endpoint returning stale data
+
+```bash
+# The per-object metrics endpoint caches data
+# Default cache TTL is 5 seconds for /metrics and 5 minutes for /metrics/per-object
+
+# If stale: check scrape interval vs. cache TTL
+# prometheus.yml: scrape_interval should be >= cache TTL
+
+# Check effective cache period:
+rabbitmqctl eval 'application:get_env(rabbitmq_prometheus, return_per_object_metrics_gauge_values).'
+```
+
+## Management API returning errors
+
+```bash
+# Test management API
+curl -u admin:pass https://rabbitmq.internal:15671/api/overview
+
+# Check management plugin status
+rabbitmq-plugins list | grep management
+
+# If management plugin crashed (restart it without downtime)
+rabbitmqctl eval 'supervisor:restart_child(rabbit_mgmt_sup, rabbit_mgmt_listener).'
+```
+
+## Grafana showing no data
+
+```bash
+# Check Prometheus has data
+# Query: rabbitmq_connections in Prometheus UI
+
+# Check Grafana data source
+# Grafana → Configuration → Data Sources → Test
+
+# Verify Prometheus is scraping RabbitMQ
+# Prometheus → Status → Targets
+# Look for the rabbitmq job; state should be UP
+```
+
+## Health check endpoints
+
+```bash
+# Liveness check (node process alive?)
+rabbitmq-diagnostics ping
+# Returns 0 on success
+
+# Readiness check (node ready to serve traffic?)
+rabbitmq-diagnostics check_local_alarms
+# Returns 0 if no alarms; non-zero if alarmed
+
+# Deep health check
+rabbitmq-diagnostics node_health_check
+# Checks: alarms, disk, virtual hosts, Erlang distribution
+```
+
+## Alert not firing when it should
+
+```bash
+# Test alert rule manually in Prometheus
+# Go to Prometheus → Alerts; check if rule is active
+
+# Common cause: metric name changed between RabbitMQ versions
+# Check current metric names:
+curl -s http://rabbitmq.internal:15692/metrics | grep 'rabbitmq_queue_messages'
+```
+
+## AceMQ Take
+
+- The `per-object` metrics endpoint (`/metrics/per-object`) is expensive. If Prometheus is slow to respond, reduce scrape frequency for this endpoint to 60s.
+- Management API errors should be treated as a P2 incident. You lose operational visibility and cannot use `rabbitmqctl list_*` commands that go through the management layer.
+- Always run `check_local_alarms` as the Kubernetes readiness probe. A node under memory alarm should not receive traffic.

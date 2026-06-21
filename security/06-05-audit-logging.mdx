@@ -1,0 +1,66 @@
+---
+title: Audit Logging
+section: 06 — Security
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Audit Logging
+
+## What RabbitMQ logs by default
+
+RabbitMQ's standard log includes:
+- Connection open/close events
+- Channel-level errors (404, 406, etc.)
+- Authentication failures
+- Node start/stop
+- Queue creation and deletion
+
+For security auditing, you also need management action events (user creation, policy changes, vHost operations).
+
+## Management audit log plugin
+
+```bash
+rabbitmq-plugins enable rabbitmq_event_exchange rabbitmq_management_agent
+```
+
+With `rabbitmq_event_exchange` enabled, all management events are published to the internal `amq.rabbitmq.event` exchange. A dedicated consumer can ship these to your SIEM.
+
+## Event types to audit
+
+| Event | Audit value |
+|---|---|
+| `user.created` / `user.deleted` | Account lifecycle |
+| `user.password.changed` | Credential changes |
+| `permission.created` / `permission.deleted` | Access control changes |
+| `vhost.created` / `vhost.deleted` | Namespace changes |
+| `policy.set` / `policy.cleared` | Configuration changes |
+| `connection.created` / `connection.closed` | Client connectivity |
+| `queue.created` / `queue.deleted` | Resource lifecycle |
+
+## Syslog forwarding
+
+```ini
+# rabbitmq.conf
+log.syslog = true
+log.syslog.identity = rabbitmq
+log.syslog.facility = daemon
+log.syslog.level = info
+```
+
+## Structured logging for SIEM
+
+```ini
+# Log to file in structured JSON (requires rabbitmq_lager_syslog_backend)
+log.console = false
+log.file = /var/log/rabbitmq/rabbit.log
+log.file.formatter = json
+```
+
+## AceMQ Take
+
+- At minimum, ship RabbitMQ logs to a centralized log store with 90-day retention. This is a requirement for SOC 2 and PCI DSS.
+- Enable `rabbitmq_event_exchange` and build a consumer that forwards management events to your SIEM.
+- Authentication failures are the highest-value signal. Alert when the failure rate exceeds your baseline by > 3×.

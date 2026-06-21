@@ -1,0 +1,84 @@
+---
+title: Rollback Strategy
+section: 10 — Upgrades
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Rollback Strategy
+
+## The hard truth about RabbitMQ rollback
+
+**In-place downgrade is not supported.** RabbitMQ cannot be rolled back from a newer version to an older version while preserving data. This is because:
+- Khepri/Mnesia schema changes are not backwards-compatible
+- Feature flags, once enabled, cannot be disabled
+- WAL format may differ between versions
+
+## Rollback options
+
+| Scenario | Rollback option |
+|---|---|
+| Upgrade failed before any node fully upgraded | Stop and restore original packages |
+| Upgrade failed mid-way (mixed versions) | Complete upgrade (forward only) or restore from backup |
+| Upgrade complete but application issues detected | Restore cluster from pre-upgrade backup |
+
+## Pre-upgrade rollback preparation
+
+```bash
+# 1. Document current package versions
+rabbitmqctl version > /tmp/pre-upgrade-version.txt
+erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell >> /tmp/pre-upgrade-version.txt
+
+# 2. Pin current packages (Debian)
+apt-mark hold rabbitmq-server erlang-nox
+
+# 3. Take disk snapshot before starting
+# This is your rollback point
+
+# 4. Export definitions
+rabbitmqctl export_definitions /backup/pre-upgrade-definitions.json
+```
+
+## Emergency restore procedure
+
+If an upgrade causes critical issues and rollback is required:
+
+```bash
+# 1. Stop all RabbitMQ nodes immediately
+for node in node1 node2 node3; do
+  ssh $node "sudo systemctl stop rabbitmq-server"
+done
+
+# 2. Restore disk snapshots to all nodes
+# (Procedure depends on your infrastructure)
+
+# 3. Reinstall original package version
+sudo apt-get install rabbitmq-server=<original-version>
+
+# 4. Start RabbitMQ
+sudo systemctl start rabbitmq-server
+
+# 5. Verify
+rabbitmqctl version  # should show original version
+rabbitmqctl cluster_status
+```
+
+## Forward-fix strategy
+
+For cases where rollback is not feasible (definition-only restore):
+
+```bash
+# 1. Let the upgrade complete on all nodes
+# 2. Import pre-upgrade definitions to restore queue topology
+rabbitmqctl import_definitions /backup/pre-upgrade-definitions.json
+# 3. Redeploy applications pointed at the new cluster
+# 4. Accept that in-flight messages at upgrade time may be lost
+```
+
+## AceMQ Take
+
+- The rollback plan is the disk snapshot. Without a snapshot of the data directory taken immediately before the upgrade, rollback is not possible. Make this a hard prerequisite.
+- Communicate the "no in-place downgrade" limitation to stakeholders before upgrade windows. Surprises about rollback constraints cause escalation during incidents.
+- For critical production clusters, consider blue/green cluster upgrades: build a new cluster on the target version, replay traffic, cut over when healthy, retire the old cluster.

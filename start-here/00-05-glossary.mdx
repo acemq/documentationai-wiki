@@ -1,0 +1,33 @@
+---
+title: Glossary
+section: 00 — Start Here
+layer: L3
+audience: [all]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Glossary
+
+| Term | Definition |
+|---|---|
+| **AMQP** | Advanced Message Queuing Protocol. RabbitMQ's primary protocol (0-9-1). |
+| **Binding** | A rule linking an exchange to a queue, with an optional routing key. |
+| **Channel** | A lightweight virtual connection within a TCP connection. |
+| **Classic queue** | The original RabbitMQ queue type. Non-replicated (single node). In 4.x, lazy mode is always on. |
+| **Consumer** | An application that receives messages from a queue. |
+| **Dead-letter exchange (DLX)** | An exchange where rejected, expired, or overflow messages are routed. |
+| **Delivery tag** | A monotonically increasing integer identifying a message delivery on a channel. |
+| **Durable** | A queue or exchange that survives a broker restart. |
+| **Exchange** | A routing component that receives messages from publishers and routes them to queues. |
+| **fdatasync** | A system call that flushes file data to disk. RabbitMQ's Raft WAL uses it; target p99 < 10ms. |
+| **Khepri** | The Raft-based metadata store introduced in RabbitMQ 3.13, replacing Mnesia in 4.0. |
+| **Mnesia** | The Erlang distributed database used as RabbitMQ's metadata store pre-4.0. Removed in 4.0. |
+| **Prefetch** | The maximum number of unacked messages a consumer can hold at once. |
+| **Publisher confirm** | A broker acknowledgement that a message was durably stored. |
+| **Quorum queue** | A replicated queue using the Raft consensus algorithm. Default for durable workloads in 4.x. |
+| **Raft** | A consensus algorithm used by quorum queues and Khepri for leader election and log replication. |
+| **Routing key** | A string used by exchanges to decide which queues receive a message. |
+| **Stream** | An append-only, replay-capable queue type using a log structure. |
+| **vHost** | A virtual host providing namespace isolation within a RabbitMQ broker. |
+| **WAL** | Write-Ahead Log. The Raft log file written before messages are committed. |

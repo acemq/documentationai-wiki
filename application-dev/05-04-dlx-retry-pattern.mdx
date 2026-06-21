@@ -1,0 +1,91 @@
+---
+title: DLX & Retry Pattern
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# DLX & Retry Pattern
+
+## Dead-letter exchange (DLX) basics
+
+A DLX is a normal exchange that receives messages when:
+1. A consumer rejects with `requeue=False`
+2. A message expires (TTL)
+3. A queue exceeds its max length
+4. A quorum queue delivery limit is exceeded
+
+```bash
+# Configure DLX via policy (preferred)
+rabbitmqctl set_policy dlx "^orders\." \
+  '{"dead-letter-exchange": "orders.dlx"}' \
+  --apply-to queues
+```
+
+## Simple DLX pattern
+
+```
+Publisher → orders.exchange → orders.queue → Consumer
+                                        ↓ (nack/reject/expire)
+                              orders.dlx → orders.dead
+```
+
+```python
+# Declare the dead-letter infrastructure
+channel.exchange_declare("orders.dlx", "direct", durable=True)
+channel.queue_declare("orders.dead", durable=True)
+channel.queue_bind("orders.dead", "orders.dlx", routing_key="orders")
+```
+
+## TTL-backoff retry pattern
+
+Use TTL + DLX to implement delayed retry:
+
+```python
+# Retry queue: messages wait here for 30 seconds, then go back to main queue
+channel.queue_declare(
+    "orders.retry",
+    durable=True,
+    arguments={
+        "x-message-ttl": 30000,          # 30 second wait
+        "x-dead-letter-exchange": "",     # default exchange
+        "x-dead-letter-routing-key": "orders"  # back to main queue
+    }
+)
+```
+
+When a message fails:
+```python
+# Reject without requeue → goes to DLX → retry queue → waits 30s → back to main
+channel.basic_nack(delivery_tag=tag, requeue=False)
+```
+
+## Delivery limit
+
+On quorum queues, `delivery-limit` provides automatic poison message handling:
+
+```bash
+rabbitmqctl set_policy delivery-limit ".*" \
+  '{"delivery-limit": 3}' --apply-to quorum-queues
+```
+
+After 3 failed deliveries, the message goes to the configured DLX automatically.
+
+## DLX message inspection
+
+Dead-lettered messages carry `x-death` headers describing why and from where:
+
+```python
+def inspect_dead_letter(ch, method, properties, body):
+    deaths = properties.headers.get('x-death', [])
+    for death in deaths:
+        print(f"Queue: {death['queue']}, Reason: {death['reason']}, Count: {death['count']}")
+```
+
+## AceMQ Take
+
+- Always configure a DLX before enabling `delivery-limit`. Without a DLX, messages rejected at the limit are silently dropped.
+- For high-TPS flows, keep `delivery-limit` at 3–5. Higher values mean more redelivery overhead before a poison message is quarantined.
+- The `x-death` header is your audit trail. Log it when processing from the dead-letter queue.

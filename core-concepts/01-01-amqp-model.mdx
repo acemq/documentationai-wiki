@@ -1,0 +1,73 @@
+---
+title: AMQP 0-9-1 Model
+section: 01 — Core Concepts
+layer: L3
+audience: [developer, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# AMQP 0-9-1 Model
+
+## The three components
+
+AMQP 0-9-1 has three core building blocks:
+
+| Component | Role |
+|---|---|
+| **Exchange** | Receives messages from publishers and routes them to queues |
+| **Queue** | Stores messages until a consumer retrieves them |
+| **Binding** | A rule linking an exchange to a queue, with an optional routing key |
+
+Publishers send to exchanges — never directly to queues. Consumers read from queues — never from exchanges.
+
+## Exchange types
+
+| Type | Routes by | Use case |
+|---|---|---|
+| **direct** | Exact routing key match | Task queues, point-to-point |
+| **topic** | Routing key pattern (`*` = one word, `#` = zero or more) | Event fan-out with filtering |
+| **fanout** | Ignores routing key; sends to all bound queues | Broadcast |
+| **headers** | Message header values | Complex routing without key tricks |
+
+## Connection and channel model
+
+AMQP 0-9-1 multiplexes channels over a single TCP connection:
+
+```
+TCP Connection (long-lived)
+  └─ Channel 1 (publisher)
+  └─ Channel 2 (consumer 1)
+  └─ Channel 3 (consumer 2)
+```
+
+**Rule:** One channel per thread. Channels are not thread-safe. Never share a channel across goroutines / threads.
+
+## Message lifecycle
+
+```
+Publisher
+  → basic.publish(exchange, routing_key, body)
+  → Exchange routes via bindings
+  → Queue stores message
+  → Broker delivers via basic.deliver
+  → Consumer processes
+  → basic.ack(delivery_tag)
+  → Broker discards message
+```
+
+## Durability and persistence
+
+| Setting | Survives restart? | Where to set |
+|---|---|---|
+| Durable exchange | Yes (metadata) | At declaration |
+| Durable queue | Yes (metadata) | At declaration |
+| Persistent message | Yes (body) | `delivery_mode=2` on publish |
+
+All three must be set for a message to survive a broker restart. Any one missing breaks the chain.
+
+## AceMQ Take
+
+- Always declare queues as **durable** in production; transient queues are only valid for ephemeral reply queues.
+- Use `delivery_mode=2` (persistent) for any message you cannot afford to lose.
+- The default exchange (`""`) routes to a queue whose name equals the routing key — useful for quick tests but avoid in production code.

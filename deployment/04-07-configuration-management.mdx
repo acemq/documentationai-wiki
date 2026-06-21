@@ -1,0 +1,92 @@
+---
+title: Configuration Management
+section: 04 — Deployment
+layer: L3
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Configuration Management
+
+## Configuration files
+
+| File | Purpose |
+|---|---|
+| `/etc/rabbitmq/rabbitmq.conf` | Main configuration (new-style, ini format) |
+| `/etc/rabbitmq/advanced.config` | Erlang-term config for advanced/override settings |
+| `/etc/rabbitmq/enabled_plugins` | Plugin activation list |
+
+## Key rabbitmq.conf settings
+
+```ini
+# Memory
+vm_memory_high_watermark.relative = 0.4     # bare metal
+# vm_memory_high_watermark.absolute = 3GB   # containers
+vm_memory_high_watermark_paging_ratio = 0.75
+
+# Disk
+disk_free_limit.relative = 1.5
+# disk_free_limit.absolute = 10GB
+
+# Networking
+listeners.tcp.default = 0.0.0.0:5672
+heartbeat = 60
+
+# Cluster
+cluster_partition_handling = pause_minority  # 3.13-4.2 only
+cluster_name = production-rabbit
+
+# Logging
+log.console = true
+log.console.level = warning
+log.file = /var/log/rabbitmq/rabbit.log
+log.file.level = info
+
+# Management
+management.load_definitions = /etc/rabbitmq/definitions.json
+```
+
+## Definition file (pre-load topology)
+
+The definitions file pre-loads vHosts, users, exchanges, queues, policies on startup:
+
+```json
+{
+  "users": [
+    {"name": "app-svc", "password_hash": "<bcrypt>", "tags": ""}
+  ],
+  "vhosts": [
+    {"name": "production"}
+  ],
+  "permissions": [
+    {"user": "app-svc", "vhost": "production",
+     "configure": "", "write": ".*", "read": ".*"}
+  ],
+  "policies": [
+    {"name": "delivery-limit", "vhost": "production",
+     "pattern": ".*", "definition": {"delivery-limit": 3},
+     "apply-to": "quorum-queues", "priority": 0}
+  ]
+}
+```
+
+Generate the definitions file via the management API:
+```bash
+curl -u admin:pass http://localhost:15672/api/definitions > definitions.json
+```
+
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `RABBITMQ_NODENAME` | Node name (`rabbit@hostname`) |
+| `RABBITMQ_ERLANG_COOKIE` | Cluster cookie (use secrets manager) |
+| `RABBITMQ_CONFIG_FILE` | Path to `rabbitmq.conf` |
+| `RABBITMQ_LOGS` | Log file path |
+
+## AceMQ Take
+
+- Manage `rabbitmq.conf` and `definitions.json` in version control. Configuration drift is a leading cause of incidents.
+- Use `management.load_definitions` for topology (queues, policies) in immutable deployments. This ensures every node starts with a known topology.
+- The `advanced.config` file is an Erlang term file — syntax errors crash the broker on startup. Validate with `erl -eval 'file:consult("/etc/rabbitmq/advanced.config")'`.

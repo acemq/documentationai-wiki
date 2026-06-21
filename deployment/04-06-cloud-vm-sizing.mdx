@@ -1,0 +1,61 @@
+---
+title: Cloud VM Sizing
+section: 04 — Deployment
+layer: L3
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Cloud VM Sizing
+
+## Instance selection principles
+
+RabbitMQ on cloud VMs needs:
+- **Compute-optimized or storage-optimized** instances with high IOPS
+- **Local NVMe storage** or provisioned IOPS volumes (not general-purpose SSD)
+- **Dedicated instances** or placement groups to avoid noisy-neighbor I/O
+
+## AWS reference instances
+
+| Workload | Instance type | Notes |
+|---|---|---|
+| Small (< 10k msg/s) | `c6i.2xlarge` | 8 vCPU, 16 GB, gp3 EBS |
+| Medium (< 50k msg/s) | `i3.xlarge` | Local NVMe, ideal for WAL |
+| Large (> 50k msg/s) | `i3en.2xlarge` | 8 vCPU, 64 GB, 2× local NVMe |
+| Very large | `i3en.6xlarge` | 24 vCPU, 192 GB, 2× 7.5 TB NVMe |
+
+`i3` and `i3en` instances have local NVMe storage — the best choice for RabbitMQ WAL. EBS gp3 with provisioned IOPS is acceptable but more expensive for equivalent throughput.
+
+## GCP reference instances
+
+| Workload | Instance type |
+|---|---|
+| Small | `c2-standard-8` + pd-ssd |
+| Medium | `n2-highmem-8` + pd-ssd (6000 IOPS) |
+| Large | `n2-highmem-16` + local SSD (375 GB NVMe per disk) |
+
+## Azure reference instances
+
+| Workload | Instance type |
+|---|---|
+| Small | `Standard_D4s_v5` + Premium SSD |
+| Medium | `Standard_L8s_v3` (local NVMe) |
+| Large | `Standard_L32s_v3` (local NVMe) |
+
+## Memory watermark in cloud VMs
+
+On standard cloud VMs (not containers), use the relative mode:
+
+```ini
+# rabbitmq.conf
+vm_memory_high_watermark.relative = 0.4
+```
+
+For container-based deployments (ECS, GKE, AKS), use absolute mode matching the container memory limit.
+
+## AceMQ Take
+
+- Instance-store (local NVMe) is strongly preferred for RabbitMQ WAL on AWS. EBS latency is unpredictable under burst conditions.
+- Provision at least 3 cloud VMs across separate Availability Zones for HA.
+- On AWS, use a Placement Group (`cluster` strategy) for inter-node Erlang distribution throughput, but note that cluster placement groups increase single-AZ exposure. Balance HA vs. network performance for your threat model.

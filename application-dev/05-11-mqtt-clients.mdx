@@ -1,0 +1,75 @@
+---
+title: MQTT Clients
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# MQTT Clients
+
+## Enable MQTT plugin
+
+```bash
+rabbitmq-plugins enable rabbitmq_mqtt
+```
+
+```ini
+# rabbitmq.conf
+mqtt.listeners.tcp.default = 1883
+mqtt.listeners.ssl.default = 8883
+mqtt.vhost = mqtt
+mqtt.exchange = amq.topic
+mqtt.default_user = mqtt-client
+mqtt.default_pass = <password>
+mqtt.allow_anonymous = false
+mqtt.prefetch = 10
+```
+
+## MQTT topic to AMQP routing
+
+RabbitMQ maps MQTT topics to AMQP routing keys:
+- MQTT `/` separator → AMQP `.` separator
+- MQTT `+` wildcard → AMQP `*`
+- MQTT `#` wildcard → AMQP `#`
+
+Example: MQTT topic `sensors/temp/room1` → AMQP routing key `sensors.temp.room1`
+
+## Python MQTT client
+
+```python
+import paho.mqtt.client as mqtt
+
+def on_connect(client, userdata, flags, rc):
+    print(f"Connected: {rc}")
+    client.subscribe("sensors/+/temp", qos=1)
+
+def on_message(client, userdata, msg):
+    print(f"{msg.topic}: {msg.payload.decode()}")
+
+client = mqtt.Client(client_id="sensor-collector")
+client.username_pw_set("mqtt-client", "<password>")
+client.tls_set(ca_certs="/etc/certs/ca.crt")
+client.on_connect = on_connect
+client.on_message = on_message
+
+client.connect("rabbitmq.internal", 8883)
+client.loop_forever()
+```
+
+## QoS levels
+
+| QoS | Guarantee | Round trips |
+|---|---|---|
+| 0 | At-most-once | 0 |
+| 1 | At-least-once | 1 (PUBACK) |
+| 2 | Exactly-once | 2 (PUBREC + PUBCOMP) |
+
+Use QoS 1 for most IoT workloads. QoS 2 on RabbitMQ requires 4 broker round-trips and is expensive at scale.
+
+## AceMQ Take
+
+- MQTT messages published to RabbitMQ land on the `amq.topic` exchange by default. AMQP consumers can subscribe to these messages via topic exchange bindings.
+- Set `mqtt.prefetch` to limit in-flight messages per MQTT connection. The default is unlimited — a slow device can be overwhelmed.
+- For IoT deployments at scale, pin `mqtt.vhost` to a dedicated vHost separate from your AMQP traffic.

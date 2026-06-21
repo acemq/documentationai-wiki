@@ -1,0 +1,90 @@
+---
+title: Publisher Confirms
+section: 05 — Application Dev
+layer: L3
+audience: [developer]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Publisher Confirms
+
+## Why confirms are mandatory
+
+Without publisher confirms, a message published to a durable queue can be lost:
+- The broker receives the message
+- Before the WAL `fdatasync`, the node crashes
+- The message is gone — with no signal to the publisher
+
+With confirms enabled, the broker only sends `basic.ack` after the message is durably stored.
+
+## Enabling confirms
+
+```python
+# pika (Python)
+channel.confirm_delivery()
+
+# Java
+channel.confirmSelect();
+
+# Go
+channel.Confirm(false)
+```
+
+## Async confirms pattern (recommended for high throughput)
+
+```python
+class AsyncPublisher:
+    def __init__(self, channel):
+        self.channel = channel
+        self.pending = {}  # delivery_tag → message
+        channel.add_on_return_callback(self._on_return)
+        channel.confirm_delivery()
+
+    def publish(self, exchange, routing_key, body, props):
+        tag = self.channel.get_next_publish_seq_no()
+        self.pending[tag] = body
+        self.channel.basic_publish(
+            exchange=exchange,
+            routing_key=routing_key,
+            body=body,
+            properties=props,
+            mandatory=True
+        )
+
+    def _on_ack(self, frame):
+        self.pending.pop(frame.method.delivery_tag, None)
+
+    def _on_nack(self, frame):
+        msg = self.pending.pop(frame.method.delivery_tag, None)
+        if msg:
+            self._retry(msg)
+```
+
+## Batched confirms
+
+For batch workloads, publish N messages then wait for all confirms:
+
+```python
+BATCH_SIZE = 1000
+
+for i, message in enumerate(messages):
+    channel.basic_publish(exchange="events", routing_key="", body=message)
+    if (i + 1) % BATCH_SIZE == 0:
+        channel.wait_for_confirms()  # blocks until all outstanding acks
+```
+
+## Common mistakes table
+
+| Mistake | Consequence | Fix |
+|---|---|---|
+| No confirm_delivery() | Messages lost on crash | Enable confirms on every channel |
+| Fire-and-forget without waiting | Pending acks accumulate, memory leak | Track outstanding acks |
+| Retrying nacks without dedup | Duplicate messages | Track message IDs |
+| Confirms on auto-ack consumer channel | No-op; confirms are publish-side only | Enable confirms on the publish channel |
+
+## AceMQ Take
+
+- Publisher confirms are non-negotiable in production. The performance overhead is low (< 5% at typical message sizes).
+- Use async confirms for throughput > 1k msg/s. Synchronous `wait_for_confirms()` per message serializes publish throughput.
+- Set `mandatory=True` if you need to detect unroutable messages (triggers `basic.return`).

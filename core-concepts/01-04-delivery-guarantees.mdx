@@ -1,0 +1,71 @@
+---
+title: Delivery Guarantees
+section: 01 — Core Concepts
+layer: L3
+audience: [developer, architect]
+rabbitmq_versions: "3.13 – 4.2"
+last_reviewed: 2026-06
+---
+
+# Delivery Guarantees
+
+## The three modes
+
+| Mode | How | Risk |
+|---|---|---|
+| **At-most-once** | Auto-ack on deliver; no confirms | Message loss on crash |
+| **At-least-once** | Manual ack + publisher confirms | Duplicate delivery on retry |
+| **Exactly-once** | Not natively supported in AMQP 0-9-1 | — |
+
+RabbitMQ provides **at-least-once** when you use both publisher confirms and manual consumer acknowledgements.
+
+## Publisher confirms
+
+Publisher confirms are the broker's acknowledgement that a message has been durably stored:
+
+```python
+channel.confirm_select()  # enable confirm mode
+channel.basic_publish(
+    exchange="orders",
+    routing_key="created",
+    body=json.dumps(order).encode(),
+    properties=pika.BasicProperties(delivery_mode=2)  # persistent
+)
+channel.wait_for_confirms()  # block until ack or nack
+```
+
+A `basic.nack` means the broker could not store the message — the publisher must retry.
+
+**Without confirms, message loss is possible even with durable queues.** A broker crash between receive and fsync loses the message silently.
+
+## Consumer acknowledgements
+
+```python
+def callback(ch, method, properties, body):
+    try:
+        process(body)
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+    except Exception:
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+```
+
+| Action | Effect |
+|---|---|
+| `basic.ack` | Message permanently removed from queue |
+| `basic.nack(requeue=True)` | Message returned to queue head |
+| `basic.nack(requeue=False)` | Message dead-lettered (if DLX configured) |
+| `basic.reject` | Same as nack for single messages |
+
+## Avoiding duplicate processing
+
+With at-least-once delivery, your consumer **will receive duplicates** in failure scenarios. Design for idempotency:
+
+- Include a message ID (`message_id` AMQP property) set by the publisher
+- Track processed IDs in a fast store (Redis, database) with a TTL
+- Or design processing to be naturally idempotent (upserts, set-member operations)
+
+## AceMQ Take
+
+- **Always use publisher confirms.** The performance cost is low; the reliability gain is essential.
+- **Never use auto-ack in production consumers.** A crash between delivery and processing silently loses the message.
+- Set `delivery-limit: 3` on quorum queues to prevent poison messages from looping forever.
