@@ -1,0 +1,66 @@
+---
+title: AMQP 1.0
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x (core since 4.0)"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [AMQP 1.0](https://www.rabbitmq.com/docs/amqp)
+
+AMQP 1.0 is an ISO/OASIS standard messaging protocol (ISO/IEC 19464). Despite sharing the "AMQP" name, it is a fundamentally different wire protocol from AMQP 0-9-1. RabbitMQ 4.0 makes AMQP 1.0 a core protocol — no plugin required.
+
+## AMQP 1.0 vs. AMQP 0-9-1
+
+| Aspect | AMQP 0-9-1 | AMQP 1.0 |
+|---|---|---|
+| Wire format | Binary, RabbitMQ-specific | Binary, ISO standard |
+| Topology model | Exchanges + queues + bindings | Broker-agnostic (attach to addresses) |
+| Flow control | Channel QoS (prefetch) | Link-level credit flow |
+| Client libraries | Large ecosystem | Smaller ecosystem |
+| Interoperability | RabbitMQ-specific | Azure Service Bus, Apache Qpid, IBM MQ, ActiveMQ |
+| Feature set in RabbitMQ | Full | Expanding (most features supported in 4.x) |
+
+## AMQP 1.0 Connection Model
+
+- **Connection** — TCP socket (same port 5672/5671 as AMQP 0-9-1 in RabbitMQ 4.0)
+- **Session** — multiplexed over a connection (analogous to AMQP 0-9-1 channel)
+- **Link** — unidirectional message flow; sender link or receiver link
+  - Sender link → publish to an address
+  - Receiver link → consume from an address
+
+## AMQP 1.0 Addresses in RabbitMQ
+
+AMQP 1.0 uses addresses (strings) to identify RabbitMQ resources:
+
+| Address | Resource |
+|---|---|
+| `/queues/my-queue` | Queue named `my-queue` |
+| `/exchanges/my-exchange/routing-key` | Exchange with routing key |
+| `/topics/my.topic` | `amq.topic` exchange with routing key |
+
+## Outcomes (Dispositions)
+
+AMQP 1.0 uses outcome codes instead of ack/nack:
+
+| Outcome | Meaning |
+|---|---|
+| `accepted` | Message processed successfully (= `basic.ack`) |
+| `rejected` | Permanent failure; dead-letter (= `basic.nack` with `requeue=false`) |
+| `released` | Temporary failure; requeue (= `basic.nack` with `requeue=true`) |
+| `modified` | Annotate and requeue/dead-letter (quorum queue feature) |
+
+## Why Use AMQP 1.0?
+
+- **Multi-broker interoperability** — Azure Service Bus, Apache Qpid, IBM MQ all speak AMQP 1.0
+- **Browser clients via WebSocket** — AMQP 1.0 over WebSocket is the recommended browser client path
+- **Standards compliance** — for organizations requiring ISO-standard protocols
+
+## AceMQ Take
+
+**Default to AMQP 0-9-1 for new server-side services.** The ecosystem is larger, the feature set in RabbitMQ is more complete, and operational tooling (rabbitmqctl, management API) is AMQP 0-9-1-centric. AMQP 1.0 in RabbitMQ is excellent but newer.
+
+**Use AMQP 1.0 for cross-broker workflows.** When integrating with Azure Service Bus, IBM MQ, or other AMQP 1.0 brokers, AMQP 1.0 is the natural choice. RabbitMQ can be one node in an AMQP 1.0 mesh.
+
+**AMQP 1.0 over WebSocket for browser clients.** The `rabbitmq_web_amqp1_0` approach provides a modern, standards-based WebSocket client path that avoids the limitations of Web STOMP or Web MQTT.

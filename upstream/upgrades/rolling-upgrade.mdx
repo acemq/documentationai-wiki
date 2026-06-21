@@ -1,0 +1,80 @@
+---
+title: Rolling Upgrade
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Rolling Upgrade](https://www.rabbitmq.com/docs/rolling-upgrade)
+
+A rolling (in-place) upgrade upgrades nodes one at a time while the cluster remains online. It is the recommended approach for minor and patch version upgrades.
+
+## Prerequisites
+
+1. **Check the rolling upgrade path** — not all version pairs support rolling upgrade; verify in release notes
+2. **Check Erlang version requirements** — new RabbitMQ version must be compatible with current or target Erlang
+3. **Enable all stable feature flags** on the current version before starting
+4. **Read the release notes** for version-specific requirements
+
+## Rolling Upgrade Procedure
+
+```bash
+# 1. Verify pre-conditions on any cluster node
+rabbitmq-diagnostics check_local_alarms
+rabbitmqctl list_feature_flags | grep -v enabled
+
+# 2. Enable all stable feature flags
+rabbitmqctl enable_feature_flag all
+
+# 3. For each node (one at a time):
+
+# 3a. Check the node is not quorum-critical before stopping
+rabbitmq-diagnostics check_if_node_is_quorum_critical
+
+# 3b. Stop the node gracefully
+rabbitmqctl stop_app
+# (upgrade packages here)
+
+# 3c. Start the upgraded node
+rabbitmq-server start
+
+# 3d. Wait for the node to rejoin and sync
+rabbitmqctl cluster_status
+rabbitmq-diagnostics check_running
+
+# 3e. Monitor queue sync before proceeding to next node
+rabbitmq-queues quorum_status <critical-queue-name>
+
+# 4. After all nodes upgraded, enable new stable feature flags
+rabbitmqctl enable_feature_flag all
+```
+
+## Node Readiness Probes
+
+During rolling upgrades, Kubernetes readiness probes can be used to signal when a restarted node is ready to receive traffic:
+
+```yaml
+readinessProbe:
+  exec:
+    command: ["rabbitmq-diagnostics", "-q", "check_running"]
+  initialDelaySeconds: 10
+  periodSeconds: 10
+```
+
+The Kubernetes Operator handles this automatically.
+
+## Mixed-Version Cluster Operation
+
+During a rolling upgrade, the cluster temporarily runs nodes at different versions. This is supported for the duration of the upgrade. Quorum queues and streams continue operating. Client connections to the upgraded nodes work normally.
+
+Feature flags act as the safety gate — new features on upgraded nodes aren't activated until `enable_feature_flag all` is called after all nodes are upgraded.
+
+## AceMQ Take
+
+**Never upgrade more than one node at a time.** Upgrading two nodes simultaneously reduces quorum headroom and increases the risk of quorum loss. One node at a time, wait for sync, then proceed.
+
+**Check quorum criticality before each node stop.** `rabbitmq-diagnostics check_if_node_is_quorum_critical` is a 2-second check that prevents the most common rolling upgrade mistake: stopping a node that would cause a quorum queue to lose its majority.
+
+**Set a per-node SLA.** Each node in the rolling upgrade should be back online within N minutes. If a node doesn't rejoin within the window, pause the upgrade and investigate before proceeding. Don't race through a rolling upgrade while one node is silently stuck.

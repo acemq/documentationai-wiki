@@ -1,0 +1,79 @@
+---
+title: Blue-Green Upgrade
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Blue-Green Upgrade](https://www.rabbitmq.com/docs/blue-green-upgrade)
+
+A blue-green deployment upgrades RabbitMQ by standing up a new cluster (green) at the target version alongside the existing cluster (blue), migrating traffic, draining messages, and decommissioning the old cluster. It is the safest upgrade strategy — rollback is as simple as switching back to blue.
+
+## When to Use Blue-Green
+
+- Major version upgrades where rolling upgrade path is not available or has high risk
+- Extra safety requirements: can abort at any point before decommissioning blue
+- Environments where brief consumer downtime during cutover is acceptable
+- Any upgrade where "we must be able to roll back instantly" is a hard requirement
+
+## Blue-Green Upgrade Steps
+
+### 1. Deploy the Green Cluster
+
+Provision a new cluster at the target RabbitMQ version. Use the same node count and hardware spec.
+
+### 2. Synchronize Metadata
+
+Import the blue cluster's definitions (topology) to the green cluster:
+
+```bash
+# Export from blue
+rabbitmqadmin -H blue-host export blue-definitions.json
+
+# Import to green
+rabbitmqadmin -H green-host import blue-definitions.json
+```
+
+This creates the same vhosts, users, exchanges, queues, and policies on green.
+
+### 3. Set Up Message Bridging (Shovel)
+
+Optionally use Shovel to forward messages from blue queues to green queues while migration is in progress. This allows continuous publishing to blue while draining.
+
+### 4. Switch Consumers to Green
+
+Reconfigure consumer applications to connect to the green cluster. Monitor green consumer connections and delivery rates.
+
+### 5. Drain Messages from Blue
+
+Wait for blue queue depths to reach zero. Monitor with:
+```bash
+rabbitmqctl -H blue-host list_queues name messages_ready
+```
+
+### 6. Switch Publishers to Green
+
+Reconfigure publisher applications to connect to the green cluster. Verify publish rates on green.
+
+### 7. Decommission Blue
+
+Once green handles all traffic and blue queues are empty, decommission the blue cluster.
+
+## Simplified Blue-Green (With Downtime)
+
+If brief downtime is acceptable:
+1. Stop all applications
+2. Export definitions from blue, import to green
+3. Move all messages via Shovel
+4. Reconfigure applications to point to green
+5. Start applications
+
+## AceMQ Take
+
+**The safest upgrade for 3.13 → 4.0 migrations.** The 3.13 to 4.0 upgrade involves Khepri migration and removal of Mnesia. If anything goes wrong during a rolling upgrade, recovery options are limited. Blue-green gives you a clean abort path.
+
+**Pre-provision green during business hours, cut over during off-peak.** The green cluster deployment (provisioning, config import, validation) can happen days before the cutover. Only the actual traffic switch (steps 4–6) needs a maintenance window.
+
+**Shovel is your message bridge.** During a blue-green migration, Shovel moves messages from blue queues to green queues in the background. Size the Shovel prefetch for throughput and monitor the blue queue depth as your drain progress indicator.

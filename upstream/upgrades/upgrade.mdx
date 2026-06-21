@@ -1,0 +1,73 @@
+---
+title: Upgrading RabbitMQ
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Upgrading RabbitMQ](https://www.rabbitmq.com/docs/upgrade)
+
+RabbitMQ upgrades require planning and a clear strategy. Three strategies are available, each with different risk/complexity tradeoffs.
+
+## Upgrade Strategies
+
+### Rolling (In-Place) Upgrade — Recommended
+
+Upgrade nodes one at a time while the cluster continues serving traffic. Supported when:
+- The upgrade path is within a supported version range
+- All stable feature flags are enabled before starting
+- Erlang version compatibility is satisfied
+
+**Steps:**
+1. Enable all stable feature flags on the current version
+2. For each node: stop → upgrade RabbitMQ + Erlang → start → monitor
+3. After all nodes upgraded, enable stable feature flags for the new version
+
+### Blue-Green Deployment — Safest
+
+Deploy a new cluster at the target version alongside the old one, migrate consumers, drain messages, migrate publishers, decommission old cluster.
+
+- Can abort by switching back to old cluster
+- Requires double the infrastructure temporarily
+- Recommended when extra safety is needed or a rolling upgrade path isn't available
+
+### Grow-then-Shrink — Not Recommended for Cluster Upgrades
+
+Add new nodes at the target version, migrate queue leaders, remove old nodes. Risks: changes replica identities, causes massive data transfers, only safe with careful precautions.
+
+**Use grow-then-shrink only for replacing a single node**, not for cluster-wide upgrades.
+
+## Version Upgradability
+
+RabbitMQ supports rolling upgrades between versions within the same minor series (e.g. 3.12.x → 3.13.x) and between some adjacent major versions (3.13 → 4.0 with proper preparation). Always check release notes for version-specific upgrade requirements.
+
+Key rule: **3.13 to 4.0 requires Khepri (`khepri_db` feature flag) to be enabled on 3.13 before upgrading to 4.0.**
+
+## Erlang Version Requirements
+
+Each RabbitMQ version has minimum and maximum supported Erlang versions. Check [which-erlang](https://www.rabbitmq.com/docs/which-erlang) before upgrading. Upgrading Erlang out-of-band from RabbitMQ can also be done during a rolling upgrade.
+
+## Pre-Upgrade Checks
+
+```bash
+# No active alarms
+rabbitmq-diagnostics check_local_alarms
+
+# All stable feature flags enabled
+rabbitmq-diagnostics check_enabled_all_feature_flags
+
+# No quorum queue sync in progress
+rabbitmq-queues check_if_node_is_quorum_critical --node rabbit@current-node
+
+# System is under normal load (not peak)
+```
+
+## AceMQ Take
+
+**Rolling upgrades for patch/minor versions; blue-green for major.** Patch and minor upgrades (3.13.5 → 3.13.10) are safe as rolling upgrades. For major version transitions (3.13 → 4.0), a blue-green deployment gives you the option to roll back if you encounter issues.
+
+**Test the upgrade in staging first.** An upgrade that takes 30 minutes in staging saves hours of production firefighting. Run your full workload test against the upgraded staging cluster before scheduling the production window.
+
+**Document your upgrade runbook.** Each step of the rolling upgrade — including which commands to run, what metrics to watch, and the rollback decision point — should be written down before the window starts. Improvising during an upgrade is how incidents happen.

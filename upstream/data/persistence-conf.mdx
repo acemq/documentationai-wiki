@@ -1,0 +1,74 @@
+---
+title: Persistence Configuration
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Persistence Configuration](https://www.rabbitmq.com/docs/persistence-conf)
+
+RabbitMQ persists messages and metadata to disk. Understanding persistence configuration helps tune performance and ensure data durability.
+
+## What Gets Persisted
+
+- **Khepri / metadata** — always persisted (vhosts, users, exchanges, queues, policies)
+- **Persistent messages** (`delivery_mode=2`) on durable queues — written to disk before confirm
+- **Transient messages** (`delivery_mode=1`) — RAM only; paged to disk under memory pressure, lost on restart
+- **Quorum queue Raft log** — always on disk
+- **Stream data** — always on disk
+
+## Classic Queue Storage (CQv2)
+
+Classic Queue v2 (default in 3.12+) stores message data in segment files. Key behaviors:
+
+- **Write-ahead log (WAL)** — messages are written to a WAL before being moved to segment files
+- **Index** — tracks message position in segment files
+- **Memory paging** — under memory pressure, in-memory messages are written to segment files
+
+Tuning (rarely needed with CQv2 defaults):
+```ini
+# Classic queue WAL flush interval (milliseconds; default: 0 = immediate)
+classic_queue_store.v2.wal.flush_interval = 0
+```
+
+## Quorum Queue Storage
+
+Quorum queues use Ra (RabbitMQ's Raft library) with an append-only log:
+
+- Raft log entries are fsynced before confirming to ensure durability
+- Periodic log snapshots compact old log entries
+- Storage backend: `ra_log_wal` (write-ahead log) + segment files
+
+Tuning:
+```ini
+# Quorum queue checkpoint interval (entries between snapshots)
+ra.wal.max_batch_size = 8192
+```
+
+## Data Directory
+
+RabbitMQ data directory (default: `/var/lib/rabbitmq`):
+
+```
+/var/lib/rabbitmq/
+  mnesia/          # Legacy; Khepri data in RabbitMQ 4.x
+  quorum/          # Quorum queue Raft logs
+  stream/          # Stream data
+  msg_stores/      # Classic queue message files
+```
+
+**Never share this directory between nodes.** Each node must have exclusive access to its data directory.
+
+## fsync and Storage Durability
+
+RabbitMQ relies on `fsync(2)` to ensure messages are durable on disk. This assumes standard POSIX filesystem semantics. Do not use distributed filesystems (NFS, CIFS, GlusterFS) for the data directory — they do not provide the required `fsync` guarantees.
+
+## AceMQ Take
+
+**Local NVMe/SSD for all production nodes.** Quorum queue Raft consensus is sensitive to fsync latency. Networked storage (EBS gp2, NFS) with variable latency can cause Raft timeouts and unnecessary leader elections. Local NVMe is the right choice; if you must use EBS, use `io1`/`io2` provisioned IOPS.
+
+**Monitor disk I/O, not just disk space.** High I/O wait time (`%iowait` in top) on RabbitMQ nodes indicates storage is a bottleneck. Add disk I/O metrics to your Prometheus dashboards alongside disk space.
+
+**Don't use `delivery_mode=1` for anything you can't afford to lose.** Transient messages surviving memory pressure paging is a nice-to-have, not a guarantee. If a message matters, mark it persistent. The disk write overhead is worth the durability guarantee.

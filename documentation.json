@@ -276,6 +276,124 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "14 — Upstream Reference",
+        "icon": "book-open",
+        "groups": [
+          {
+            "group": "Core AMQP",
+            "pages": [
+              {"title": "Queues", "path": "upstream/core/queues"},
+              {"title": "Exchanges", "path": "upstream/core/exchanges"},
+              {"title": "Connections", "path": "upstream/core/connections"},
+              {"title": "Channels", "path": "upstream/core/channels"},
+              {"title": "Consumers", "path": "upstream/core/consumers"},
+              {"title": "Publishers", "path": "upstream/core/publishers"},
+              {"title": "Publisher Confirms & Acks", "path": "upstream/core/confirms"},
+              {"title": "Supported Protocols", "path": "upstream/core/protocols"},
+              {"title": "Reliability Guide", "path": "upstream/core/reliability"}
+            ]
+          },
+          {
+            "group": "Queue Types & Features",
+            "pages": [
+              {"title": "Quorum Queues", "path": "upstream/queues/quorum-queues"},
+              {"title": "Classic Queues", "path": "upstream/queues/classic-queues"},
+              {"title": "Streams", "path": "upstream/queues/streams"},
+              {"title": "Dead Letter Exchanges", "path": "upstream/queues/dlx"},
+              {"title": "Time-To-Live", "path": "upstream/queues/ttl"},
+              {"title": "Queue Length Limits", "path": "upstream/queues/maxlength"},
+              {"title": "Priority Queues", "path": "upstream/queues/priority"},
+              {"title": "Consumer Prefetch (QoS)", "path": "upstream/queues/consumer-prefetch"}
+            ]
+          },
+          {
+            "group": "Clustering & Networking",
+            "pages": [
+              {"title": "Clustering Guide", "path": "upstream/cluster/clustering"},
+              {"title": "Cluster Formation", "path": "upstream/cluster/cluster-formation"},
+              {"title": "Network Partitions", "path": "upstream/cluster/partitions"},
+              {"title": "Networking", "path": "upstream/cluster/networking"},
+              {"title": "Heartbeats", "path": "upstream/cluster/heartbeats"}
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              {"title": "Configuration", "path": "upstream/config/configure"},
+              {"title": "Policies", "path": "upstream/config/policies"},
+              {"title": "Parameters", "path": "upstream/config/parameters"},
+              {"title": "Definitions Export & Import", "path": "upstream/config/definitions"},
+              {"title": "Feature Flags", "path": "upstream/config/feature-flags"},
+              {"title": "Metadata Store (Khepri)", "path": "upstream/config/metadata-store"},
+              {"title": "Plugins", "path": "upstream/config/plugins"}
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              {"title": "TLS Support", "path": "upstream/security/ssl"},
+              {"title": "Authentication", "path": "upstream/security/authentication"},
+              {"title": "OAuth 2.0", "path": "upstream/security/oauth2"},
+              {"title": "Access Control", "path": "upstream/security/access-control"},
+              {"title": "Virtual Hosts", "path": "upstream/security/vhosts"}
+            ]
+          },
+          {
+            "group": "Monitoring & Operations",
+            "pages": [
+              {"title": "Monitoring", "path": "upstream/monitoring/monitoring"},
+              {"title": "Prometheus & Grafana", "path": "upstream/monitoring/prometheus"},
+              {"title": "Management Plugin", "path": "upstream/monitoring/management"},
+              {"title": "Logging", "path": "upstream/monitoring/logging"},
+              {"title": "Alarms", "path": "upstream/monitoring/alarms"},
+              {"title": "Flow Control", "path": "upstream/monitoring/flow-control"},
+              {"title": "Production Checklist", "path": "upstream/monitoring/production-checklist"}
+            ]
+          },
+          {
+            "group": "Distributed Messaging",
+            "pages": [
+              {"title": "Shovel Plugin", "path": "upstream/distributed/shovel"},
+              {"title": "Dynamic Shovel", "path": "upstream/distributed/shovel-dynamic"},
+              {"title": "Federation Plugin", "path": "upstream/distributed/federation"},
+              {"title": "Federated Exchanges", "path": "upstream/distributed/federated-exchanges"}
+            ]
+          },
+          {
+            "group": "Protocols",
+            "pages": [
+              {"title": "MQTT", "path": "upstream/protocols/mqtt"},
+              {"title": "STOMP", "path": "upstream/protocols/stomp"},
+              {"title": "AMQP 1.0", "path": "upstream/protocols/amqp-10"}
+            ]
+          },
+          {
+            "group": "Upgrades",
+            "pages": [
+              {"title": "Upgrade Strategies", "path": "upstream/upgrades/upgrade"},
+              {"title": "Rolling Upgrade", "path": "upstream/upgrades/rolling-upgrade"},
+              {"title": "Blue-Green Upgrade", "path": "upstream/upgrades/blue-green-upgrade"},
+              {"title": "Erlang Version Requirements", "path": "upstream/upgrades/which-erlang"}
+            ]
+          },
+          {
+            "group": "Troubleshooting",
+            "pages": [
+              {"title": "Troubleshooting RabbitMQ", "path": "upstream/troubleshooting/troubleshooting"},
+              {"title": "Troubleshooting Networking", "path": "upstream/troubleshooting/troubleshooting-networking"},
+              {"title": "Troubleshooting TLS", "path": "upstream/troubleshooting/troubleshooting-ssl"}
+            ]
+          },
+          {
+            "group": "Storage & CLI",
+            "pages": [
+              {"title": "Persistence Configuration", "path": "upstream/data/persistence-conf"},
+              {"title": "CLI Tools", "path": "upstream/data/cli"}
+            ]
+          }
+        ]
       }
     ]
   }

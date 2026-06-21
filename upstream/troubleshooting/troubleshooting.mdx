@@ -1,0 +1,95 @@
+---
+title: Troubleshooting RabbitMQ
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, developer]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Troubleshooting RabbitMQ](https://www.rabbitmq.com/docs/troubleshooting)
+
+This guide provides a structured approach to diagnosing and resolving RabbitMQ issues.
+
+## First Steps: Collect Information
+
+```bash
+# Is the node running?
+rabbitmq-diagnostics check_running
+
+# Any active alarms (memory, disk)?
+rabbitmq-diagnostics check_local_alarms
+
+# Cluster status and reachable nodes
+rabbitmqctl cluster_status
+
+# Is the node quorum-critical?
+rabbitmq-diagnostics check_if_node_is_quorum_critical
+
+# Connection count and state
+rabbitmqctl list_connections state client_properties
+
+# Channel count
+rabbitmqctl list_channels number consumer_count
+
+# Queue depths and consumer counts
+rabbitmqctl list_queues name messages_ready messages_unacked consumers
+```
+
+## Common Issues and Diagnosis
+
+### High Memory Usage / Memory Alarm
+
+1. Check which queues hold the most messages: `rabbitmqctl list_queues name memory messages`
+2. Check connection count — many idle connections use memory
+3. Check for consumers with high prefetch and many unacked messages
+4. Look for large message payloads
+
+See the [Memory Use](https://www.rabbitmq.com/docs/memory-use) guide.
+
+### Growing Queue Depth (Consumer Lag)
+
+1. Check consumer count on the queue: is it zero?
+2. Check consumer ack rate vs. message delivery rate
+3. Check for channel exceptions in logs (consumer crashing)
+4. Check prefetch — is it too low for the processing rate?
+
+### Connection Failures
+
+1. Check firewall rules for port 5672/5671
+2. Verify Erlang cookie matches between clients and nodes (for CLI tools)
+3. Check TLS certificate validity: `openssl s_client -connect host:5671`
+4. Check authentication: correct username/password/vhost?
+5. Check `max_connections` limit
+
+### Node Won't Start
+
+1. Check RabbitMQ log for startup errors: `journalctl -u rabbitmq-server` or `/var/log/rabbitmq/`
+2. Check Erlang cookie consistency with other cluster nodes
+3. Check data directory permissions
+4. Check for port conflicts: `ss -tlnp | grep 5672`
+5. Check disk space on data directory
+
+### Publisher Confirms Timing Out
+
+1. Check for memory or disk alarms (blocking publisher connections)
+2. Check quorum queue status — if the leader is unavailable, confirms are delayed
+3. Check for overly large publish batches overwhelming the queue
+
+## Logs as Diagnostic Tool
+
+```bash
+# Recent RabbitMQ log
+tail -f /var/log/rabbitmq/rabbit@$(hostname).log
+
+# Filter for errors and warnings
+grep -E '(error|warning|alarm)' /var/log/rabbitmq/rabbit@$(hostname).log | tail -50
+```
+
+## AceMQ Take
+
+**Start with alarms and queue depth.** 80% of RabbitMQ production issues are either a resource alarm (memory, disk) or consumer lag. These two checks catch most incidents before they escalate.
+
+**Correlate broker logs with application logs.** A `PRECONDITION_FAILED` in the broker log corresponds to a specific application trying to redeclare a queue with mismatched properties. Match the broker timestamp to your application deployment history.
+
+**Build diagnostic runbooks before incidents.** The commands above should be in a runbook that any on-call engineer can follow at 3am. Don't discover the diagnostic commands during an incident — the muscle memory of running them quickly matters.

@@ -1,0 +1,96 @@
+---
+title: Troubleshooting Networking
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Troubleshooting Networking](https://www.rabbitmq.com/docs/troubleshooting-networking)
+
+Network issues are among the most common causes of RabbitMQ problems: connection failures, dropped connections, partition detection, and inter-node communication errors all have networking roots.
+
+## Connectivity Checks
+
+```bash
+# Can the client reach the broker port?
+telnet rabbitmq-host 5672
+nc -zv rabbitmq-host 5672
+
+# Check port is listening on the broker
+ss -tlnp | grep 5672
+
+# Check firewall rules (Linux)
+iptables -L -n | grep 5672
+firewall-cmd --list-ports
+
+# Check connection timeout (cloud security groups, NACLs)
+curl -v telnet://rabbitmq-host:5672
+```
+
+## Common Networking Issues
+
+### Connections Dropped Silently
+
+**Cause:** Stateful firewall or NAT device closes idle TCP connections before the heartbeat detects the failure.
+
+**Diagnosis:** Clients see unexpected `connection closed` errors; broker log shows connections closed without a `connection.close` frame from the client.
+
+**Fix:** Set AMQP heartbeat ≤ (firewall idle timeout / 2). Enable TCP keepalives:
+```ini
+tcp_listen_options.keepalive = true
+```
+
+### "Connection Refused" on Port 5672
+
+**Causes:** RabbitMQ isn't running; listener bound to wrong interface; firewall blocking; port occupied by another process.
+
+**Diagnosis steps:**
+1. `systemctl status rabbitmq-server`
+2. `ss -tlnp | grep 5672` — check if anything listens on 5672
+3. `rabbitmq-diagnostics check_port_connectivity`
+4. Check `rabbitmq.conf` for `listeners.tcp.default` binding
+
+### Inter-Node Communication Failures (Cluster)
+
+**Ports required:** 25672 (Erlang distribution), 4369 (EPMD).
+
+```bash
+# Test inter-node port from node A to node B
+nc -zv node-b-hostname 25672
+nc -zv node-b-hostname 4369
+
+# Check Erlang distribution
+rabbitmqctl eval 'net_adm:ping(rabbit@"other-node").'
+```
+
+**Common cause:** Security groups or firewall rules block 25672 or 4369 between cluster nodes.
+
+### DNS Resolution Failures
+
+Node names include hostnames. If hostnames don't resolve between nodes, the cluster can't form:
+
+```bash
+# Check hostname resolution from each node
+nslookup node-b-hostname
+python3 -c "import socket; print(socket.gethostbyname('node-b-hostname'))"
+
+# Check that each node can resolve the others
+rabbitmqctl eval 'inet:gethostbyname("other-node-hostname").'
+```
+
+### TLS Handshake Failures
+
+See the [TLS Troubleshooting](https://www.rabbitmq.com/docs/troubleshooting-ssl) guide. Quick check:
+```bash
+openssl s_client -connect rabbitmq-host:5671 -showcerts -CAfile /path/to/ca-cert.pem
+```
+
+## AceMQ Take
+
+**Enable heartbeats and TCP keepalives by default.** These are always-on defenses against silent connection drops from firewalls and NATs. The overhead is negligible.
+
+**Check firewall rules when nodes can't form a cluster.** Port 25672 and 4369 between cluster nodes are the #1 cause of cluster formation failures in cloud environments. These ports are often omitted from security group rules because they're not in the default RabbitMQ port documentation people reference.
+
+**Use `rabbitmq-diagnostics` for systematic checks.** Rather than writing one-off bash commands, chain the diagnostics tools: `check_running`, `check_port_connectivity`, `check_if_node_is_quorum_critical`. These are idempotent and safe to run against production at any time.

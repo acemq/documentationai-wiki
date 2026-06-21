@@ -1,0 +1,99 @@
+---
+title: Troubleshooting TLS
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Troubleshooting TLS](https://www.rabbitmq.com/docs/troubleshooting-ssl)
+
+TLS configuration issues are subtle and error messages are often cryptic. This guide covers systematic diagnosis of TLS connection failures.
+
+## Test TLS Connection with OpenSSL
+
+```bash
+# Basic TLS handshake test
+openssl s_client -connect rabbitmq-host:5671 \
+  -CAfile /path/to/ca-cert.pem \
+  -showcerts
+
+# Test with client certificate (mTLS)
+openssl s_client -connect rabbitmq-host:5671 \
+  -CAfile /path/to/ca-cert.pem \
+  -cert /path/to/client-cert.pem \
+  -key /path/to/client-key.pem
+```
+
+A successful TLS handshake prints the certificate chain and shows `Verify return code: 0 (ok)`.
+
+## Common TLS Errors and Causes
+
+### `CERTIFICATE_VERIFY_FAILED`
+
+- CA certificate not trusted by client
+- Server certificate expired
+- Hostname mismatch (certificate CN/SAN doesn't match hostname)
+- Certificate chain incomplete (intermediate CA missing)
+
+**Diagnose:**
+```bash
+openssl verify -CAfile ca-cert.pem server-cert.pem
+openssl x509 -in server-cert.pem -noout -dates -subject -issuer
+openssl x509 -in server-cert.pem -noout -ext subjectAltName
+```
+
+### `HANDSHAKE_FAILURE` / `NO_SHARED_CIPHER`
+
+- Client and server don't share a common TLS version or cipher suite
+- Client requires TLS 1.3 but server only offers 1.2 (or vice versa)
+
+**Diagnose:**
+```bash
+openssl s_client -connect rabbitmq-host:5671 -tls1_3  # test TLS 1.3
+openssl s_client -connect rabbitmq-host:5671 -tls1_2  # test TLS 1.2
+```
+
+### `UNKNOWN_CA` / `DEPTH_ZERO_SELF_SIGNED_CERT`
+
+- Self-signed certificate not in client's trust store
+- mTLS: server doesn't trust the client's CA
+
+### Connection Succeeds but Authentication Fails
+
+With mTLS and `EXTERNAL` auth, the certificate CN must match an existing RabbitMQ user:
+```bash
+# Check the CN of the client certificate
+openssl x509 -in client-cert.pem -noout -subject
+# CN must match: rabbitmqctl list_users
+```
+
+## RabbitMQ TLS Logging
+
+Enable TLS debug logging temporarily:
+```ini
+log.connection.level = debug
+```
+
+This logs TLS handshake details — reduce back to `info` after diagnosing.
+
+## Certificate Expiry Monitoring
+
+```bash
+# Check expiry
+openssl x509 -in server-cert.pem -noout -enddate
+
+# Prometheus metric (rabbitmq_prometheus plugin)
+rabbitmq_ssl_certificate_expiry_seconds
+```
+
+Alert at 30 days and 7 days before expiry.
+
+## AceMQ Take
+
+**Always test TLS with `openssl s_client` before connecting application clients.** It gives cleaner error messages than AMQP client libraries and isolates TLS issues from application issues.
+
+**Test the full certificate chain.** Many TLS failures are caused by a missing intermediate CA certificate. Always configure both the leaf cert and the full chain in your `ssl_options.certfile` or provide a separate `ssl_options.cacertfile` that includes all intermediates.
+
+**Set certificate expiry alerts in Prometheus.** A production-blocking TLS failure from an expired cert is entirely avoidable. Alert at 30 days — that's enough time to rotate without pressure.

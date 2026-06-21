@@ -1,0 +1,103 @@
+---
+title: CLI Tools
+section: "## — Upstream Reference"
+layer: L1
+audience: [sre, developer]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [CLI Tools](https://www.rabbitmq.com/docs/cli)
+
+RabbitMQ ships with several CLI tools for administration, diagnostics, and operations. All CLI tools use the Erlang distribution and require the correct Erlang cookie to authenticate.
+
+## CLI Tools Overview
+
+| Tool | Purpose |
+|---|---|
+| `rabbitmqctl` | Primary admin tool: users, vhosts, queues, cluster, policies |
+| `rabbitmq-diagnostics` | Health checks and diagnostics |
+| `rabbitmq-plugins` | Plugin management |
+| `rabbitmq-queues` | Queue-specific operations (quorum queue management) |
+| `rabbitmq-streams` | Stream-specific operations |
+| `rabbitmq-upgrade` | Upgrade helpers (feature flag management) |
+| `rabbitmqadmin` | HTTP API wrapper (Python); topology and definitions management |
+
+## Authentication for CLI Tools
+
+CLI tools use the Erlang distribution to communicate with the broker. They require:
+1. The correct Erlang cookie (`~/.erlang.cookie` or `$RABBITMQ_ERLANG_COOKIE`)
+2. Network access to the Erlang distribution port (25672)
+3. The ability to resolve the node name
+
+```bash
+# Run against a remote node
+rabbitmqctl -n rabbit@remote-host list_queues
+
+# With long node names
+rabbitmqctl -n rabbit@remote-host.internal.example.com --longnames list_queues
+```
+
+## Key rabbitmqctl Commands
+
+```bash
+# Queue operations
+rabbitmqctl list_queues name messages_ready messages_unacked consumers
+rabbitmqctl purge_queue my-queue
+rabbitmqctl delete_queue my-queue
+
+# User management
+rabbitmqctl list_users
+rabbitmqctl add_user myuser mypassword
+rabbitmqctl set_permissions -p /myvhost myuser ".*" ".*" ".*"
+rabbitmqctl delete_user myuser
+
+# Vhost management
+rabbitmqctl list_vhosts
+rabbitmqctl add_vhost /myapp
+rabbitmqctl delete_vhost /myapp
+
+# Policy management
+rabbitmqctl list_policies
+rabbitmqctl set_policy my-policy "^my-queue" '{"message-ttl": 60000}' --apply-to queues
+rabbitmqctl clear_policy my-policy
+
+# Cluster operations
+rabbitmqctl cluster_status
+rabbitmqctl forget_cluster_node rabbit@old-node
+```
+
+## Key rabbitmq-diagnostics Commands
+
+```bash
+# Health checks
+rabbitmq-diagnostics check_running
+rabbitmq-diagnostics check_local_alarms
+rabbitmq-diagnostics check_port_connectivity
+rabbitmq-diagnostics check_if_node_is_quorum_critical
+rabbitmq-diagnostics check_virtual_hosts
+
+# Information
+rabbitmq-diagnostics cluster_status
+rabbitmq-diagnostics environment
+rabbitmq-diagnostics listeners
+rabbitmq-diagnostics alarms
+```
+
+## Key rabbitmq-queues Commands
+
+```bash
+# Quorum queue operations
+rabbitmq-queues quorum_status my-quorum-queue
+rabbitmq-queues grow rabbit@new-node all --vhost-pattern ".*"
+rabbitmq-queues shrink rabbit@old-node
+rabbitmq-queues rebalance all
+```
+
+## AceMQ Take
+
+**Prefer `rabbitmq-diagnostics` for health checks.** These commands are idempotent, safe to run on production, and designed for scripting. Build your runbook health checks around them rather than ad-hoc `rabbitmqctl status` parsing.
+
+**Use `rabbitmq-queues rebalance` after rolling upgrades.** During a rolling upgrade, quorum queue leaders can end up concentrated on a small number of nodes. `rabbitmq-queues rebalance all` redistributes leaders evenly across the cluster after the upgrade completes.
+
+**`rabbitmqadmin` for topology validation in CI/CD.** Unlike the Erlang-distribution-based tools, `rabbitmqadmin` uses the HTTP API and doesn't require Erlang cookie access. Use it in CI pipelines to verify that required queues, exchanges, and policies exist in the target environment.

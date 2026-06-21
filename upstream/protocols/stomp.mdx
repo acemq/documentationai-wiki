@@ -1,0 +1,69 @@
+---
+title: STOMP Plugin
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [STOMP Plugin](https://www.rabbitmq.com/docs/stomp)
+
+The `rabbitmq_stomp` plugin enables STOMP (Simple Text Oriented Messaging Protocol). STOMP is a text-based protocol, easy to implement and test via telnet or curl-like tools.
+
+## Enabling STOMP
+
+```bash
+rabbitmq-plugins enable rabbitmq_stomp
+```
+
+Default port: `61613`.
+
+## STOMP Internals
+
+RabbitMQ's STOMP plugin proxies STOMP over AMQP 0-9-1 internally. STOMP frames map to AMQP operations:
+
+| STOMP Frame | AMQP Operation |
+|---|---|
+| `CONNECT` | Connection open + authenticate |
+| `SEND` | `basic.publish` |
+| `SUBSCRIBE` | `basic.consume` |
+| `UNSUBSCRIBE` | `basic.cancel` |
+| `ACK` | `basic.ack` |
+| `NACK` | `basic.nack` |
+| `DISCONNECT` | Connection close |
+
+## STOMP Destinations
+
+STOMP uses a `/destination` header to identify where to send messages. RabbitMQ maps destinations to AMQP concepts:
+
+| Destination format | AMQP mapping |
+|---|---|
+| `/queue/my-queue` | Direct to named queue |
+| `/exchange/my-exchange/routing.key` | Exchange + routing key |
+| `/topic/my.topic` | `amq.topic` exchange with routing key |
+| `/amq/queue/my-queue` | Predeclared queue (not auto-created) |
+
+## Configuration
+
+```ini
+stomp.listeners.tcp.default = 61613
+stomp.listeners.ssl.default = 61614
+stomp.default_vhost = /
+stomp.default_login = stomp-user
+stomp.default_passcode = s3cr3t
+```
+
+## Web STOMP (WebSocket)
+
+```bash
+rabbitmq-plugins enable rabbitmq_web_stomp
+```
+
+Browser STOMP clients connect via WebSocket on port 15674 (`/ws` path).
+
+## AceMQ Take
+
+**STOMP for legacy systems and quick testing.** If you have a legacy application with a STOMP client library and no AMQP support, STOMP is the path of least resistance. For greenfield development, AMQP 0-9-1 or AMQP 1.0 is preferred — richer features and better performance.
+
+**Use STOMP over WebSocket for browser messaging.** The Web STOMP plugin provides a stable WebSocket interface for browser clients. This is simpler to implement than AMQP 1.0 over WebSocket for teams with existing STOMP knowledge.
