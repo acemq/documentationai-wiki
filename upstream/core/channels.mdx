@@ -1,0 +1,60 @@
+---
+title: Channels
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Channels](https://www.rabbitmq.com/docs/channels)
+
+A channel is a virtual connection inside a physical TCP connection. All AMQP 0-9-1 operations (declare, publish, consume, ack) happen on a channel. Channels are lightweight and designed for high-volume creation — unlike connections, opening a channel doesn't create a new TCP socket.
+
+## Channels and Connections
+
+Every channel belongs to exactly one connection. Multiple channels can be open on a single connection simultaneously (up to `channel_max`, default 2047). Channels are numbered 1–N within their connection.
+
+**Typical pattern:** one connection per application process, one channel per thread or logical workflow (publisher thread, consumer thread, topology-declaration thread).
+
+## Channel Lifecycle
+
+1. Open (`channel.open`)
+2. In use — declare topology, publish, consume, ack
+3. Close — either gracefully (`channel.close`) or via error
+
+## Channel Errors and Exceptions
+
+Channel-level errors result in a channel exception that closes the channel. The connection remains open. Errors are returned as `channel.close` with a reply code and text:
+
+| Code | Name | Common Cause |
+|---|---|---|
+| 403 | `ACCESS_REFUSED` | Permission denied or reserved name |
+| 404 | `NOT_FOUND` | Queue/exchange doesn't exist |
+| 405 | `RESOURCE_LOCKED` | Exclusive queue already in use |
+| 406 | `PRECONDITION_FAILED` | Property mismatch on declare |
+
+After a channel exception, you must open a new channel on the same connection. Most client libraries handle this automatically when auto-recovery is enabled.
+
+## Channel Limits
+
+- **Per connection:** negotiated up to `channel_max` (default 2047). Configure in `rabbitmq.conf` as `channel_max`.
+- **Per node:** total open channels across all connections. Monitor `rabbitmq_channels` — a high channel count with a low connection count often indicates channel leaks.
+
+## Channel and Publisher Confirms
+
+Publisher confirms are enabled per-channel with `confirm.select`. Once enabled, the broker acks or nacks each published message with a sequence number (the `delivery-tag`). Confirm mode cannot be combined with transaction mode on the same channel.
+
+## Channel and Consumer Prefetch (QoS)
+
+Prefetch (QoS) is set per-channel with `basic.qos`. The `prefetch_count` limits how many unacknowledged messages the broker delivers to the consumer before waiting for acks. This is the primary flow-control mechanism for consumers.
+
+## AceMQ Take
+
+**One channel per thread, never shared.** Channels are not thread-safe in most AMQP client libraries. Sharing a channel across threads requires external locking and is a common source of subtle bugs under load.
+
+**Don't open/close channels in a hot loop.** Channel creation has overhead — declare your channels at startup and reuse them. If a channel gets an exception, open a new one, but don't treat channels as disposable request-scoped resources.
+
+**Watch for channel leaks.** A steadily growing `rabbitmq_channels` metric with no corresponding connection growth is a leak — typically from code that opens channels on exceptions but doesn't close them on the happy path. Set a channel max alert (e.g. `rabbitmq_channels > 500 per node`) to catch this early.
+
+**Set `channel_max` explicitly.** The default 2047 is generous. For well-understood workloads, set a tighter limit to catch runaway channel creation early rather than discovering it when the broker rejects new channels.

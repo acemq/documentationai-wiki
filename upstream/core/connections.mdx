@@ -1,0 +1,74 @@
+---
+title: Connections
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Connections](https://www.rabbitmq.com/docs/connections)
+
+A RabbitMQ connection is a long-lived TCP connection between a client and a broker node. All messaging operations flow over channels multiplexed within this single TCP connection.
+
+## Connection Lifecycle
+
+1. **TCP handshake** — client connects to broker IP/port (default 5672 for AMQP, 5671 for TLS)
+2. **Protocol handshake** — version negotiation (AMQP 0-9-1 or AMQP 1.0)
+3. **Authentication** — SASL mechanism (PLAIN, EXTERNAL, etc.)
+4. **Virtual host selection** — client selects a vhost
+5. **Tuning** — max frame size, heartbeat interval, max channels negotiated
+6. **In use** — channels opened, messaging begins
+7. **Close** — graceful `connection.close` / `detach` or TCP reset
+
+## Connection Parameters
+
+| Parameter | Default | Notes |
+|---|---|---|
+| AMQP port | 5672 | Cleartext |
+| AMQP TLS port | 5671 | TLS encrypted |
+| AMQP 1.0 port | 5672 / 5671 | Shared with 0-9-1 in RMQ 4.0+ |
+| Heartbeat | 60s | Negotiated between client and server |
+| Frame max | 131072 bytes | Negotiated; larger = fewer round-trips |
+| Max channels | 2047 | Per connection |
+
+## TLS Connections
+
+For production, all connections should use TLS (port 5671). RabbitMQ supports:
+- Mutual TLS (mTLS) for client certificate authentication
+- Server-side TLS with CA-signed certificates
+- Configurable cipher suites and TLS version minimum (recommend TLS 1.2+)
+
+See the [SSL guide](https://www.rabbitmq.com/docs/ssl) for full configuration.
+
+## Virtual Hosts
+
+Clients select a virtual host at connection time. All resources (queues, exchanges, bindings, policies) are scoped to the vhost. A connection is permanently bound to one vhost — to access another vhost, open a separate connection.
+
+## Connection Recovery
+
+Most AMQP client libraries support automatic connection recovery after network failures. Recovery typically involves:
+1. Re-establish TCP connection
+2. Re-authenticate
+3. Re-open channels
+4. Re-declare topology (if configured)
+5. Re-register consumers
+
+Ensure your client library is configured for automatic recovery in production. Manual recovery is error-prone and rarely the right choice.
+
+## Connection Limits and Resource Use
+
+Each connection consumes a file descriptor and memory on the broker. At high connection counts:
+- Increase `ulimit -n` (open file descriptors) on the OS
+- Monitor `rabbitmq_connections` and `rabbitmq_connections_opened_total`
+- Consider connection pooling at the application level (one connection per process is typical; one per thread is too many)
+
+## AceMQ Take
+
+**One connection per process, not per thread.** Channels are the lightweight multiplexing layer — open one channel per thread/goroutine/coroutine. Opening a connection per thread is a common mistake that exhausts broker file descriptors at moderate concurrency.
+
+**Always use TLS in production.** Cleartext AMQP is acceptable only for localhost or dedicated private-network segments with no cross-zone traffic. Any connection traversing a network boundary should be TLS.
+
+**Enable connection recovery.** Every production client should have automatic connection recovery configured with an exponential backoff policy. Test your recovery logic by killing broker connections in staging — connection recovery failures in production are a common source of outages.
+
+**Monitor connection churn.** A rising `rabbitmq_connections_opened_total` rate with a low steady-state `rabbitmq_connections` count indicates connection churn — usually a misconfigured client that opens and closes connections per request. This hammers the broker's authentication and channel setup overhead.

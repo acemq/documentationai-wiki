@@ -1,0 +1,74 @@
+---
+title: Reliability Guide
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Reliability Guide](https://www.rabbitmq.com/docs/reliability)
+
+This guide covers the mechanisms RabbitMQ provides for reliable messaging and how to use them correctly. "Reliable" in this context means: messages are not lost between publisher and consumer even in the presence of network failures, broker restarts, or consumer crashes.
+
+## The Reliability Stack
+
+End-to-end reliability requires all four layers working together:
+
+| Layer | Mechanism | Without It, You Lose |
+|---|---|---|
+| Publisher → Broker | Publisher confirms | Messages on network failure or broker restart |
+| Broker storage | Durable queues + persistent messages | Messages on broker restart |
+| Broker replication | Quorum queues or streams | Messages on node failure |
+| Broker → Consumer | Manual consumer acks | Messages when consumer crashes mid-processing |
+
+## Durable Queues and Persistent Messages
+
+**Durable queue** — the queue definition survives restart, but without persistent messages, the content does not.
+
+**Persistent message** — `delivery_mode = 2` causes the message to be written to disk before being delivered. On a durable queue, persistent messages survive broker restart.
+
+Both must be set for messages to survive a restart. One without the other is not sufficient.
+
+## Publisher Confirms
+
+Enable `confirm.select` on the channel and listen for `basic.ack` / `basic.nack`. Don't publish-and-forget in production.
+
+For quorum queues, an ack means the message is on disk on a majority of replicas — safe even if the leader fails immediately after.
+
+## Consumer Acknowledgements
+
+Use manual acks (`no_ack=false`). Process the message, then ack. On failure, nack with requeue or route to DLX.
+
+Redelivered messages have `redelivered=true`. Design consumers to be idempotent or use message IDs for deduplication.
+
+## Connection and Channel Recovery
+
+- Enable automatic connection recovery in your client library
+- Re-declare topology on recovery (or rely on pre-existing durable declarations)
+- Re-register consumers on channel recovery
+
+Most modern AMQP client libraries (Java, .NET, Python Pika, Go amqp091-go) support automatic recovery. Ensure it's configured, not just available.
+
+## Quorum Queues for Replication
+
+Classic queue mirroring was removed in RabbitMQ 4.0. Use quorum queues for all workloads requiring replication. Quorum queues:
+- Replicate via Raft (majority must accept before ack)
+- Survive loss of `(N-1)/2` nodes (floor) in an N-node quorum
+- Provide leader election within seconds of node failure
+
+## Dead Letter Queues for Error Handling
+
+Configure a DLX on queues where permanent processing failures are possible. Messages rejected with `requeue=false` are routed to the DLX. This prevents infinite retry loops and provides visibility into failed messages.
+
+## Poison Message Handling (Quorum Queues)
+
+Set `delivery-limit` policy on quorum queues. A message that exceeds the delivery count is automatically dead-lettered even without an explicit nack. This catches cases where a consumer crashes after receiving but before processing (the message is redelivered indefinitely otherwise).
+
+## AceMQ Take
+
+**Treat reliability as a checklist, not a default.** Every production queue should be audited against: durable ✓, quorum ✓, persistent message mode ✓, publisher confirms ✓, manual consumer acks ✓, DLX configured ✓. Missing any one of these creates a silent data loss scenario.
+
+**Document your at-least-once boundary explicitly.** Know exactly what "at-least-once" means for each message type in your system. For idempotent operations (cache invalidation), it's free. For non-idempotent ones (payment capture), you need deduplication. Make this explicit in your architecture docs, not an assumption.
+
+**Test your reliability guarantees.** Run chaos scenarios in staging: kill the broker mid-publish, kill a consumer mid-ack, network-partition a quorum queue member. If your application recovers correctly without message loss or duplication, your reliability stack is wired correctly. If it doesn't, fix it before production traffic finds the gap.

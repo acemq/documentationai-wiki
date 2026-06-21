@@ -1,0 +1,93 @@
+---
+title: Consumers
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Consumers](https://www.rabbitmq.com/docs/consumers)
+
+Consumers are application processes that subscribe to a queue and receive messages delivered by RabbitMQ. A consumer registers with `basic.consume` and receives messages via `basic.deliver` until it cancels or the channel/connection closes.
+
+## Consumer Registration
+
+```
+basic.consume(
+  queue        = "my-queue",
+  consumer_tag = "",          # broker generates a unique tag if empty
+  no_ack       = false,       # always false in production — use manual acks
+  exclusive    = false,       # only this consumer on the queue
+  arguments    = {}           # x-priority, x-cancel-on-ha-failover, etc.
+)
+```
+
+The broker returns a `consumer_tag` that identifies this consumer subscription. Use it to cancel with `basic.cancel`.
+
+## Acknowledgement Modes
+
+| Mode | `no_ack` flag | Description |
+|---|---|---|
+| **Manual** (recommended) | `false` | Consumer explicitly acks/nacks each message |
+| **Auto** | `true` | Broker considers delivered = acknowledged; no redelivery on failure |
+
+Auto-ack provides higher throughput but zero delivery guarantees. If the consumer crashes after delivery but before processing, the message is lost.
+
+### Ack / Nack / Reject
+
+- `basic.ack(delivery_tag, multiple)` — acknowledge one or a batch of messages
+- `basic.nack(delivery_tag, multiple, requeue)` — negative-ack; requeue=true puts message back, requeue=false routes to DLX
+- `basic.reject(delivery_tag, requeue)` — same as nack for a single message
+
+Never ack with `multiple=true` using a delivery tag you haven't processed — you'll inadvertently ack all messages up to that tag.
+
+## Prefetch (Consumer QoS)
+
+Prefetch limits unacknowledged messages in flight per consumer:
+
+```
+basic.qos(prefetch_count = 10, global = false)
+```
+
+- `prefetch_count = 0` means unlimited (default) — dangerous with slow or failing consumers
+- `global = false` — limit per consumer (recommended)
+- `global = true` — limit shared across all consumers on the channel
+
+For quorum queues, per-consumer prefetch is the only supported mode (`global` prefetch is not supported).
+
+## Consumer Priorities
+
+Assign priorities via `x-priority` argument:
+```
+basic.consume(arguments={"x-priority": 10})
+```
+
+Higher-priority consumers receive messages first. Lower-priority consumers only receive messages when higher-priority consumers are blocked (prefetch saturated). Useful for tiered consumers with different processing SLAs.
+
+## Consumer Cancellation Notification
+
+If a queue is deleted or a HA failover cancels the subscription, the broker sends `basic.cancel` to the consumer. Client libraries can listen for this notification to trigger reconnection logic. Enable this capability with the `x-cancel-on-ha-failover` argument (set automatically by some client libraries).
+
+## Consumer Timeouts (Quorum Queues)
+
+Quorum queues support a delivery acknowledgement timeout (`consumer_timeout`). If an ack isn't received within the timeout, the consumer's channel is closed with a `PRECONDITION_FAILED` exception. This prevents stuck consumers from blocking queue progress indefinitely.
+
+Configure globally in `rabbitmq.conf`:
+```ini
+consumer_timeout = 1800000  # 30 minutes in milliseconds
+```
+
+## Single Active Consumer
+
+Set `x-single-active-consumer: true` on a quorum queue to ensure only one consumer is active at a time. When the active consumer disconnects, the next registered consumer takes over. Provides ordered processing without application-level locking.
+
+## AceMQ Take
+
+**Always use manual acks in production.** Auto-ack is a trap — it looks fine under normal conditions but silently drops messages on any consumer failure. The throughput difference is rarely significant enough to justify the data loss risk.
+
+**Tune prefetch for your workload.** Start with `prefetch_count = 10–50` and measure. Too low = consumers starved waiting for acks; too high = a slow consumer holds too many messages, starving other consumers. For CPU-bound processing, align prefetch with your worker pool size.
+
+**Set consumer timeouts.** A consumer that receives a message and never acks (network partition, process hang) blocks queue delivery for all consumers sharing that prefetch channel. Consumer timeouts (quorum queues) or application-level heartbeat checks are mandatory for long-running processing workflows.
+
+**Use Single Active Consumer for ordered fan-in.** When you have multiple consumer replicas but need strict ordering, SAC gives you hot/standby semantics without a distributed lock.

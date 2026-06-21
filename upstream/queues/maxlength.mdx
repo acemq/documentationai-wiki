@@ -1,0 +1,54 @@
+---
+title: Queue Length Limits
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Queue Length Limits](https://www.rabbitmq.com/docs/maxlength)
+
+RabbitMQ allows setting limits on queue depth by message count or total byte size. When a queue reaches its limit, new incoming messages are handled according to the overflow policy.
+
+## Configuring Queue Length Limits
+
+**Via policy (recommended):**
+```bash
+rabbitmqctl set_policy max-length "my-queue" \
+  '{"max-length": 10000, "overflow": "reject-publish-dlx"}' \
+  --apply-to queues
+```
+
+**Via x-arguments at declaration:**
+```java
+args.put("x-max-length", 10000);              // max message count
+args.put("x-max-length-bytes", 100000000);    // max total size in bytes
+args.put("x-overflow", "reject-publish-dlx"); // overflow policy
+```
+
+## Overflow Policies
+
+| Policy | Behavior |
+|---|---|
+| `drop-head` (default) | Drops oldest message from queue head to make room for new one |
+| `reject-publish` | Rejects new publishes with `basic.nack` (if publisher confirms enabled) or drops silently |
+| `reject-publish-dlx` | Rejects and routes overflow messages to DLX |
+
+**`drop-head`** is the default and the most dangerous for data integrity — it silently drops messages from the head without any notification to the publisher. The consumer also never sees these messages.
+
+**`reject-publish-dlx`** is the safest option: overflow triggers a DLX route, giving you visibility and a chance to handle the overflow.
+
+## Byte-Based Limits
+
+`x-max-length-bytes` limits total message body size. This is useful when messages have variable sizes and you want to bound memory/disk by bytes rather than count.
+
+Both limits can be applied simultaneously — the queue overflows when either threshold is reached.
+
+## AceMQ Take
+
+**Always set max-length on bounded queues.** An unbounded queue in a system under load will grow indefinitely until it hits a memory or disk alarm, which triggers broker-wide backpressure. Setting a max-length turns an unbounded problem into a bounded overflow that can be handled with an overflow policy.
+
+**Use `reject-publish-dlx` not `drop-head`.** The default `drop-head` silently loses the oldest messages — exactly the messages you most need to process (in FIFO systems). `reject-publish-dlx` gives both the publisher (via nack) and an operator (via DLQ) visibility into overflow.
+
+**Set max-length based on your consumer lag budget.** If your consumer processes 1,000 messages/minute and your acceptable lag is 30 minutes, max-length of 30,000 messages is the ceiling. Size it with headroom for burst, but not so large that lag recovery takes longer than your SLA allows.

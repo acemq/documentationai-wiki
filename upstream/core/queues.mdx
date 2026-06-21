@@ -1,0 +1,73 @@
+---
+title: Queues
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Queues](https://www.rabbitmq.com/docs/queues)
+
+A queue in RabbitMQ is an ordered collection of messages delivered in FIFO order. Messages are enqueued at the tail and consumed from the head, though certain features (priorities, consumer requeuing) can alter observed ordering.
+
+## Queue Names
+
+Queues have names up to 255 bytes of UTF-8. Names starting with `amq.` are reserved for broker-internal use — attempting to declare one results in a channel-level 403 `ACCESS_REFUSED` exception.
+
+**Server-named queues:** Pass an empty string as the queue name and RabbitMQ generates a unique name. Use these for transient, per-connection state (e.g. RPC reply queues). The generated name is available on the channel for the lifetime of that declaration.
+
+## Queue Properties
+
+| Property | Description |
+|---|---|
+| `durable` | Queue survives broker restart (written to disk) |
+| `exclusive` | Used by only one connection; deleted when that connection closes |
+| `auto-delete` | Deleted when the last consumer unsubscribes |
+| `arguments` | Map of optional `x-*` key-value pairs |
+
+> **Warning:** Exclusive queues with static names create a race condition on reconnect — the broker tries to delete while the client tries to redeclare. Always use server-named queues for exclusive use cases.
+
+### Declaration and Property Equivalence
+
+Declaring a queue that already exists with different properties raises a channel-level 406 `PRECONDITION_FAILED`. The queue type property check can be relaxed via `vhost` config. You can also configure a Default Queue Type (DQT) per virtual host.
+
+## Optional Arguments (`x-arguments`)
+
+Optional arguments are a `key → value` map passed at declaration time or set via policies:
+
+- `x-queue-type` — `quorum`, `classic`, or `stream` (immutable after declaration)
+- `x-message-ttl` — per-queue message TTL in milliseconds
+- `x-max-length` — max queue depth by message count
+- `x-max-length-bytes` — max queue depth by size
+- `x-dead-letter-exchange` — DLX target exchange
+- `x-max-priority` — max priority levels for classic queues (immutable)
+- `x-expires` — queue TTL in milliseconds (unused queue is auto-deleted)
+
+> **Best practice:** Set `x-*` arguments via **policies** wherever possible. Hardcoded x-arguments in application code require queue deletion + redeclaration to change.
+
+## Durability and Message Persistence
+
+Queue durability controls whether the queue definition survives restarts. **Message persistence** is separate — a message must be published with `delivery-mode: 2` (persistent) to survive restart of a durable queue. A durable queue with non-persistent messages will lose those messages on restart.
+
+## Replicated Queue Types
+
+- **Quorum queues** — Raft-based, the recommended default for durable replicated workloads (RabbitMQ 3.8+)
+- **Streams** — append-only, replay-capable, high-throughput fan-out
+- **Classic queues (non-replicated)** — single-node; mirroring removed in RabbitMQ 4.0
+
+Clients connect to any node; RabbitMQ transparently routes operations to the queue leader.
+
+## Runtime Resource Characteristics
+
+Each queue replica occupies memory for in-flight messages and bookkeeping. Quorum queues write a Raft log to disk. Classic queues page messages to disk when memory pressure is detected. Monitor `rabbitmq_queue_messages_ram` and `rabbitmq_queue_messages_persistent` via Prometheus.
+
+## AceMQ Take
+
+**Default to quorum queues.** For any workload where message loss is unacceptable, declare with `x-queue-type: quorum`. The latency overhead (Raft round-trip) is negligible compared to the safety guarantee at production throughputs.
+
+**Policy > x-args for everything mutable.** TTL, DLX, max-length — set these via named policies in the management UI or IaC (Terraform provider, definitions JSON). This lets you tune without touching application deployments.
+
+**Server-name your exclusive queues.** Any per-connection, per-session, or RPC reply queue should be server-named to avoid reconnect races.
+
+**Watch queue depth in your runbooks.** A growing `messages_ready` metric on a quorum queue that isn't draining is an early signal of consumer starvation or a slow consumer blocking others. Set alerts before queues become multi-million-message backlogs — recovery from those states involves coordinated draining, not just restarting consumers.

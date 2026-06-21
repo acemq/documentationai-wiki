@@ -1,0 +1,90 @@
+---
+title: Streams
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.9 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Streams](https://www.rabbitmq.com/docs/streams)
+
+Streams are a persistent, replicated, append-only data structure in RabbitMQ. Unlike queues, consumed messages are **not removed** — they remain available for replay. Multiple consumers can read from the same stream independently, each tracking their own offset.
+
+Streams were introduced in RabbitMQ 3.9 and provide Kafka-like semantics within RabbitMQ.
+
+## Streams vs. Queues
+
+| Feature | Stream | Queue |
+|---|---|---|
+| Message retention after consume | Yes (time/size based) | No (deleted on ack) |
+| Multiple independent consumers | Yes (each tracks offset) | No (competitive consumers share queue) |
+| Replay / rewind | Yes | No |
+| Ordering guarantee | Strict per-stream | FIFO (unless priority/requeue) |
+| Protocol | Streams protocol or AMQP | AMQP |
+| Max throughput | Very high (millions/sec) | Lower (ack-per-message overhead) |
+| Message priority | Not supported | Supported (classic queues) |
+| Per-message TTL | Not supported | Supported |
+| Dead lettering | Not supported | Supported |
+
+## Declaring a Stream
+
+```java
+Map<String, Object> args = new HashMap<>();
+args.put("x-queue-type", "stream");
+args.put("x-max-length-bytes", 20_000_000_000L);  // 20 GB retention
+args.put("x-stream-max-segment-size-bytes", 500_000_000L);  // 500 MB segments
+args.put("x-max-age", "7D");  // 7-day time-based retention
+channel.queueDeclare("my-stream", true, false, false, args);
+```
+
+## Retention Policies
+
+Streams are retained by size and/or age — not by consumption:
+
+- `x-max-length-bytes` — total byte size cap across all segments
+- `x-max-age` — time-based expiry (`1Y`, `7D`, `24h`, `30m`, `60s`)
+- `x-stream-max-segment-size-bytes` — size of each segment file (default 500 MB)
+
+## Consuming from a Stream
+
+Consumers specify an **offset** to start reading from:
+
+```java
+channel.basicConsume("my-stream", false, Map.of(
+    "x-stream-offset", "first"      // "first", "last", "next", timestamp, or numeric offset
+), consumer);
+```
+
+Common offsets:
+- `"first"` — replay from the beginning
+- `"last"` — receive only new messages
+- `"next"` — synonym for last
+- Timestamp (Date object) — start from a specific point in time
+- Numeric — exact offset
+
+## RabbitMQ Streams Protocol
+
+For maximum throughput, use the native Streams protocol (port 5552) with the stream-specific client libraries. This provides:
+- Sub-millisecond publish latency at high throughput
+- Multi-node connections (clients can connect to multiple replicas)
+- Efficient offset tracking
+
+The Streams protocol is separate from AMQP — a different library/port is required.
+
+## Super Streams (Partitioned Streams)
+
+A super stream is a partitioned stream: multiple underlying streams, each a partition, with a routing exchange front-end. Similar to Kafka partitions:
+- Messages are routed to partitions based on routing key hash
+- Each partition is consumed independently
+- Enables parallel consumption with ordering guarantees per partition
+
+## AceMQ Take
+
+**Use streams for fan-out and replay.** When multiple independent services need to consume the same events (audit, analytics, notifications, downstream processing), a stream eliminates the need for multiple queues with fan-out exchanges. Each consumer reads at their own pace.
+
+**Streams for event sourcing.** If your architecture uses event sourcing, streams provide a durable, ordered, replayable event log. New services can replay from the beginning to rebuild state.
+
+**Size streams generously.** Stream storage is cheap (compared to message loss). A 7-day retention window with a 50 GB cap is a reasonable starting point for most event streams. Scale up based on production message rates.
+
+**Don't use streams as queues.** Streams don't support TTL per message, dead-lettering, or message removal on consume. If your workflow depends on these features, use a quorum queue instead.

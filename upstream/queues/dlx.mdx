@@ -1,0 +1,85 @@
+---
+title: Dead Letter Exchanges
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Dead Letter Exchanges](https://www.rabbitmq.com/docs/dlx)
+
+A dead letter exchange (DLX) is any normal exchange designated to receive messages that a queue cannot or should not deliver. Dead-lettering provides a safety net for rejected, expired, and overflowed messages.
+
+## When Messages Are Dead-Lettered
+
+1. **Rejected** — consumer sends `basic.nack` or `basic.reject` with `requeue=false`
+2. **Expired** — message TTL exceeded (per-queue or per-message)
+3. **Max length exceeded** — queue overflows and the overflow policy drops messages to DLX
+4. **Delivery limit exceeded** — quorum queue `delivery-limit` hit (poison message handling)
+
+> Queue expiration (`x-expires`) does **not** dead-letter messages — the whole queue is deleted.
+
+## Configuring a DLX
+
+**Via policy (recommended):**
+```bash
+rabbitmqctl set_policy DLX ".*" \
+  '{"dead-letter-exchange": "dlx.main", "dead-letter-routing-key": "dlq.all"}' \
+  --apply-to queues --priority 7
+```
+
+**Via x-arguments (avoid — hard to change later):**
+```java
+args.put("x-dead-letter-exchange", "dlx.main");
+args.put("x-dead-letter-routing-key", "dlq.all");
+```
+
+When both are set, x-arguments take precedence. Use policies — they can be updated at any time without redeploying.
+
+## Routing Dead-Lettered Messages
+
+If `dead-letter-routing-key` is not set, the message retains its original routing key(s) (including `CC` headers). If set, the specified key is used instead.
+
+Dead-lettered messages can be routed through any exchange type — fanout, topic, or direct. For a DLQ that receives all failed messages regardless of origin, use a fanout DLX or a topic DLX with a wildcard binding.
+
+## Dead-Letter Cycle Detection
+
+RabbitMQ detects cycles (a dead-lettered message arriving back at its source queue) and drops the message if no rejection occurred in the cycle. This prevents infinite loops.
+
+## Dead-Letter Message Headers
+
+Dead-lettered messages gain `x-death` header tracking their history:
+
+| Header key | Description |
+|---|---|
+| `x-death[].queue` | Queue the message was dead-lettered from |
+| `x-death[].reason` | `rejected`, `expired`, `maxlen`, or `delivery_limit` |
+| `x-death[].count` | How many times dead-lettered from this queue for this reason |
+| `x-first-death-queue` | First queue it was dead-lettered from |
+| `x-first-death-reason` | First reason |
+| `x-last-death-queue` | Most recent queue |
+
+Use these headers in DLQ consumers to route to specific handling (retry, alert, drop).
+
+## At-Least-Once Dead-Lettering (Quorum Queues)
+
+By default, dead-lettering is at-most-once — messages are removed from the source queue before the DLX publish is confirmed. Quorum queues support **at-least-once** DLX via internal publisher confirms:
+
+```bash
+rabbitmqctl set_policy at-least-once-dlx ".*" \
+  '{"dead-letter-strategy": "at-least-once"}' \
+  --apply-to quorum-queues
+```
+
+This guarantees dead-lettered messages are not lost during DLX routing failures, at the cost of potential duplicate DLX delivery.
+
+## AceMQ Take
+
+**DLX on every production queue.** A queue without a DLX silently drops rejected and expired messages — there's no visibility into what went wrong. Configure a DLX on all production queues from day one.
+
+**Separate DLQs per concern.** Don't route all dead letters to a single DLQ. Use topic routing from your DLX to separate queues: `dlq.payments`, `dlq.notifications`, `dlq.orders`. Each team can consume their own DLQ independently.
+
+**Monitor DLQ depth as a first-class signal.** A rising DLQ message count is often the first sign of an upstream processing problem — before errors surface in application logs. Alert on DLQ depth > threshold.
+
+**Build DLQ consumers, not just DLQs.** A DLQ that fills up without a consumer is just a delayed data-loss problem. Build a DLQ consumer that: logs structured context, emits an alert, and optionally re-publishes to the original queue after a delay (for transient failures) or routes to a human review system (for permanent failures).

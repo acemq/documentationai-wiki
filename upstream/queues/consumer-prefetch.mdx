@@ -1,0 +1,59 @@
+---
+title: Consumer Prefetch (QoS)
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Consumer Prefetch](https://www.rabbitmq.com/docs/consumer-prefetch)
+
+Prefetch (QoS — Quality of Service) limits the number of unacknowledged messages the broker delivers to a consumer before waiting for acknowledgements. It is the primary flow-control mechanism between broker and consumer.
+
+## Setting Prefetch
+
+```python
+# Per-consumer prefetch (recommended)
+channel.basic_qos(prefetch_count=10, global_qos=False)
+
+# Channel-wide shared prefetch (less common)
+channel.basic_qos(prefetch_count=50, global_qos=True)
+```
+
+- `prefetch_count = 0` — unlimited (default). The broker pushes messages as fast as the consumer can receive. Dangerous with slow consumers.
+- `global_qos = False` — limit applies per consumer on this channel (recommended)
+- `global_qos = True` — limit shared across all consumers on this channel
+
+> For quorum queues: `global_qos=True` is not supported. Use per-consumer prefetch only.
+
+## How Prefetch Affects Throughput
+
+Prefetch creates a pipeline: the broker sends N messages before waiting for acks. While the consumer is processing message 1, messages 2–N are already in transit. This hides round-trip latency and maximizes consumer throughput.
+
+**Too low:** Consumer is idle waiting for the next message after each ack. Throughput is limited by round-trip latency.
+
+**Too high:** A slow or crashing consumer holds many messages in memory/flight that can't be redelivered to other consumers.
+
+**Rule of thumb:** Start at `prefetch = 2 × (processing time / round-trip time)`. For most LAN deployments with sub-millisecond round-trips and 10ms processing time, prefetch = 10–50 is a reasonable range.
+
+## Prefetch and Multiple Consumers
+
+With per-consumer prefetch and multiple consumers on the same queue:
+- Each consumer has its own in-flight window
+- A slow consumer only blocks its own window — other consumers receive their messages
+- Total in-flight messages across all consumers = `prefetch_count × consumer_count`
+
+## Prefetch and Work Distribution
+
+Low prefetch (1–2) results in round-robin-like distribution. High prefetch can cause uneven distribution — a fast consumer can hold all in-flight messages, leaving slow consumers idle.
+
+For equal distribution with variable processing times, prefetch=1 is the most fair but lowest throughput. Tune based on whether fairness or throughput is more important.
+
+## AceMQ Take
+
+**Never leave prefetch at 0 in production.** Unlimited prefetch causes a fast broker to overwhelm a slow consumer, buffering thousands of messages in the consumer's memory before any acks arrive. On consumer restart, all those buffered (but unacked) messages must be redelivered — causing a burst to other consumers.
+
+**Prefetch = concurrency.** If your consumer processes messages concurrently (thread pool, goroutine pool, async tasks), prefetch should match your concurrency level. A single-threaded consumer with prefetch=100 means 99 messages sit in a buffer doing nothing.
+
+**Measure, don't guess.** Instrument consumer ack latency and queue depth. If queue depth is non-zero and consumer ack rate is lower than publish rate, increase concurrency or prefetch. If consumer memory is high, decrease prefetch.

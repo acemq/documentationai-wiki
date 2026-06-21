@@ -1,0 +1,74 @@
+---
+title: Time-To-Live and Expiration
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Time-to-Live and Expiration](https://www.rabbitmq.com/docs/ttl)
+
+RabbitMQ supports TTL (time-to-live) at two levels: per-message and per-queue. TTL controls how long messages and queues live before being expired.
+
+## Per-Queue Message TTL
+
+Messages older than the configured TTL are considered expired and will not be delivered to consumers. The broker guarantees expired messages won't be delivered via `basic.deliver` or `basic.get`.
+
+**Via policy (recommended):**
+```bash
+rabbitmqctl set_policy TTL ".*" '{"message-ttl": 60000}' --apply-to queues
+```
+
+**Via x-argument at declaration:**
+```java
+args.put("x-message-ttl", 60000);  // 60 seconds in milliseconds
+```
+
+TTL must be a non-negative integer in milliseconds. `TTL=0` causes messages to expire immediately unless a consumer is ready — useful as an alternative to the unsupported `immediate` flag.
+
+## Per-Message TTL
+
+Publishers can set TTL per message via the `expiration` property (as a string of milliseconds):
+```java
+AMQP.BasicProperties props = new AMQP.BasicProperties.Builder()
+    .expiration("60000")  // 60 seconds
+    .build();
+```
+
+When both per-queue and per-message TTLs are set, the lower value wins.
+
+## Expiry Timing
+
+Expiry is checked when a message reaches the **head of the queue** (for classic queues) or on a schedule (for quorum queues). Messages deep in a queue can expire but won't be removed until they reach the head. This means expired messages can accumulate behind non-expired ones.
+
+For retroactively applied TTL policies, have consumers online to drain the queue faster.
+
+## Dead-Lettering on Expiry
+
+Expired messages are routed to the DLX if one is configured. The `x-death` header reason is `expired`. Original TTL is removed from the message header on dead-lettering to prevent re-expiration in the DLX queue.
+
+## Queue TTL (`x-expires`)
+
+Queues can be configured to auto-delete after a period of inactivity:
+
+```bash
+rabbitmqctl set_policy expiry ".*" '{"expires": 1800000}' --apply-to queues
+```
+```java
+args.put("x-expires", 1800000);  // 30 minutes
+```
+
+`x-expires` counts from the last time the queue was used (consumer attached, message published, or `basic.get` called). Must be a positive integer.
+
+> **Note:** Queue TTL makes most sense for transient, non-durable classic queues (e.g. RPC reply queues). Streams do not support expiration.
+
+## AceMQ Take
+
+**Set TTL via policy, not x-arguments.** Policy-based TTL can be changed at runtime without touching application code. x-argument TTL requires queue deletion and redeclaration.
+
+**Use queue TTL to manage RPC reply queue sprawl.** RPC-style patterns create a server-named reply queue per request. Without cleanup these queues accumulate indefinitely. Set `x-expires` on reply queues (or use the default TTL policy on the vhost) to auto-delete unused reply queues after a few minutes.
+
+**TTL is not a substitute for proper DLQ handling.** Expired messages going to a DLX is useful for visibility, but don't rely on expiry as your error handling strategy. Message expiry means the SLA was missed — if that's a normal business event, you need a proper retry-and-DLQ workflow, not just TTL.
+
+**Monitor expired messages.** Track `rabbitmq_queue_messages_dead_lettered_expired_total` in your Prometheus dashboards. A high expiry rate often signals that consumers are too slow relative to publisher rate — a capacity planning signal, not just a cleanup mechanism.

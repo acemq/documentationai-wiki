@@ -1,0 +1,103 @@
+---
+title: Quorum Queues
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.8 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Quorum Queues](https://www.rabbitmq.com/docs/quorum-queues)
+
+The quorum queue is RabbitMQ's modern, replicated queue type built on the Raft consensus algorithm. It is the **recommended default** for any workload requiring durable, highly available queues.
+
+Classic queue mirroring was removed in RabbitMQ 4.0. Quorum queues and streams are the two replicated data structures.
+
+## What Makes a Quorum?
+
+A quorum requires a majority: `floor(N/2) + 1` members must agree. A 3-member quorum tolerates 1 failure; a 5-member quorum tolerates 2 failures.
+
+## Use Cases
+
+**Good fit:**
+- Long-lived queues critical to application correctness
+- Order processing, payment events, audit trails — anywhere message loss has a significant business impact
+- Any queue that previously used classic mirrored queues
+
+**Not a good fit:**
+- Transient or exclusive queues (high churn, short-lived)
+- Lowest-possible-latency requirements (Raft adds a round-trip)
+- Very large backlogs (5M+ messages) — use streams instead
+- High fan-out patterns — use streams instead
+
+## Declaring a Quorum Queue
+
+```java
+Map<String, Object> args = new HashMap<>();
+args.put("x-queue-type", "quorum");
+channel.queueDeclare("my-quorum-queue", true, false, false, args);
+```
+
+Or set as the default queue type per vhost. Once declared, the queue type is immutable.
+
+## Replication
+
+Quorum queues maintain `quorum_initial_group_size` replicas (default 3, configurable). Each replica is called a **member** — one is the **leader**, the rest are **followers**.
+
+The leader handles all reads and writes. Followers replicate the Raft log and can become leader on failover.
+
+**Leader rebalancing:** After a node recovers, it becomes a follower of existing leaders. Leaders can be rebalanced manually or via policy to distribute load evenly.
+
+## Key Features vs. Classic Queues
+
+| Feature | Quorum | Classic |
+|---|---|---|
+| Replication | Raft (majority) | None (mirroring removed in 4.0) |
+| At-least-once DLX | Yes | No (best-effort) |
+| Poison message handling | Yes (`delivery-limit`) | No |
+| Delayed retry | Yes | No |
+| Consumer timeout | Yes | No |
+| Priority queues | Strict ordering | Classic priority |
+| Global QoS | Not supported | Supported |
+| Transient messages | Stored on disk | Can store in RAM |
+
+## Poison Message Handling
+
+Set `delivery-limit` policy to cap redelivery attempts:
+```bash
+rabbitmqctl set_policy delivery-limit ".*" '{"delivery-limit": 5}' --apply-to quorum-queues
+```
+Messages exceeding the limit are automatically dead-lettered.
+
+## At-Least-Once Dead-Lettering
+
+Unlike classic queues, quorum queues republish to the DLX with **internal publisher confirms**, ensuring DLX messages are not lost even during routing failures.
+
+## Consumer Timeout
+
+Configure globally:
+```ini
+consumer_timeout = 1800000  # 30 minutes
+```
+Consumers that don't ack within this window have their channel closed. This prevents stuck consumers from blocking queue progress.
+
+## Memory and Disk Footprint
+
+Quorum queues store all messages on disk (Raft log). In-memory caching is managed automatically. Expect higher disk usage than equivalent classic queues — overprovision disk accordingly.
+
+Monitor: `rabbitmq_quorum_queue_raft_log_commit_index`, `rabbitmq_queue_messages_persistent`, disk utilization per node.
+
+## Performance Tuning
+
+- Keep quorum count at 3 for most clusters; 5 only when you need 2-failure tolerance
+- Avoid more than ~5000 quorum queues per cluster — review topology if approaching this
+- Fast local NVMe/SSD storage is critical for quorum queue performance
+- Publisher confirms batch size 10–100 balances throughput and confirm overhead
+
+## AceMQ Take
+
+**Quorum queues as the default.** For every production queue that isn't explicitly transient or latency-critical, declare `x-queue-type: quorum`. The operational overhead is minimal and the data safety benefit is significant — especially during maintenance windows and rolling upgrades.
+
+**Set `delivery-limit`.** Every quorum queue should have a delivery-limit policy. Without it, a permanently unprocessable message can loop indefinitely, consuming consumer bandwidth and cluttering queue depth metrics.
+
+**Monitor Raft lag.** `rabbitmq_quorum_queue_raft_log_commit_index` vs. `raft_log_last_applied_index` across members shows replication lag. A growing gap on a follower indicates disk or network pressure — investigate before it becomes a quorum stall.

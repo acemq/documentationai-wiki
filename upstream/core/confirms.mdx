@@ -1,0 +1,82 @@
+---
+title: Publisher Confirms and Consumer Acknowledgements
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Publisher Confirms and Consumer Acks](https://www.rabbitmq.com/docs/confirms)
+
+RabbitMQ provides two complementary mechanisms for reliable message delivery: **publisher confirms** (guarantees from broker to publisher that a message was received and persisted) and **consumer acknowledgements** (guarantees from consumer to broker that a message was processed).
+
+Together they implement end-to-end at-least-once delivery.
+
+## Publisher Confirms
+
+### Enabling Confirms
+
+```
+# Enable confirm mode on a channel (one-way — cannot be disabled)
+channel.confirm_select()
+```
+
+Once enabled, every `basic.publish` increments a monotonically increasing delivery tag. The broker responds with:
+- `basic.ack(delivery_tag, multiple)` — success; `multiple=true` means all tags up to this one are acked
+- `basic.nack(delivery_tag, multiple)` — failure; publisher should retry or dead-letter
+
+### When Are Confirms Issued?
+
+- **Classic queues** — ack is issued when the message is written to the queue (and to disk if persistent)
+- **Quorum queues** — ack is issued after Raft consensus: a majority of replicas have accepted the message
+- **Streams** — ack is issued after the write is replicated
+
+For quorum queues, a confirm means the message is safe even if the current leader fails immediately after.
+
+### Unconfirmed Messages
+
+Publishers should track unconfirmed messages by delivery tag. On `basic.nack`, republish or route to a dead-letter queue. Set a maximum unconfirmed-in-flight window to bound memory usage and replay cost.
+
+## Consumer Acknowledgements
+
+### Manual Acknowledgement (Recommended)
+
+```python
+# After processing successfully:
+channel.basic_ack(delivery_tag=method.delivery_tag)
+
+# On processing failure — requeue for retry:
+channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+
+# On terminal failure — route to DLX:
+channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+```
+
+### Redelivery
+
+If a consumer connection drops with unacknowledged messages, RabbitMQ requeues them and redelivers to another consumer. Redelivered messages have `redelivered=true` in the message properties. Consumers should handle redelivery idempotently.
+
+### Delivery Tags
+
+Delivery tags are monotonically increasing integers per channel. They are scoped to the channel — the same integer can appear on different channels. `multiple=true` acknowledges all tags from 1 to the specified tag on that channel.
+
+## Prefetch and Unacknowledged Message Limits
+
+`basic.qos(prefetch_count=N)` limits how many unacknowledged messages the broker sends before waiting for acks. This is the primary consumer-side flow control mechanism. Without it (prefetch=0), a fast broker can deliver messages faster than a slow consumer can process and ack them, causing consumer-side memory pressure.
+
+## Negative Acknowledgements and Dead Lettering
+
+When `requeue=false` and the queue has a DLX configured, rejected messages are dead-lettered rather than dropped. The dead-lettered message includes an `x-death` header tracing its path.
+
+Quorum queues add **at-least-once dead-lettering**: rejected messages are republished to the DLX with internal publisher confirms, preventing loss during DLX routing failures.
+
+## AceMQ Take
+
+**Publisher confirms + manual consumer acks = end-to-end at-least-once.** Without both, you have gaps. Without publisher confirms, messages can be lost between publisher and broker. Without manual consumer acks, messages are lost between broker and consumer.
+
+**Track unconfirmed message windows.** Don't just fire and forget and hope acks arrive. Keep a sliding window of unconfirmed delivery tags (in a sorted set or queue). Alert if the window grows beyond a threshold — it usually means the broker is under pressure or a nack storm is coming.
+
+**Design consumers for idempotency.** At-least-once means the same message can be delivered more than once (on reconnect, failover, or nack+requeue). If your consumer action isn't idempotent (inserting a DB row, sending an email), you need deduplication — use `message_id` with a seen-IDs set, or use exactly-once semantics at the database level.
+
+**Use `requeue=false` + DLX for permanent failures.** If a message fails processing repeatedly (bad format, downstream service permanently unavailable), sending it back to the queue creates an infinite loop. Nack with `requeue=false` to route it to a DLX where it can be inspected, retried on a schedule, or escalated.

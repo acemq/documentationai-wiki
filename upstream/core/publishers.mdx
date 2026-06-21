@@ -1,0 +1,79 @@
+---
+title: Publishers
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Publishers](https://www.rabbitmq.com/docs/publishers)
+
+Publishers send messages to exchanges using `basic.publish`. The exchange routes each message to zero or more queues or streams based on its type and bindings.
+
+## Publishing a Message
+
+```
+basic.publish(
+  exchange    = "my.topic",
+  routing_key = "orders.payment.captured",
+  mandatory   = false,
+  immediate   = false,   # removed in RabbitMQ 3.x
+  properties  = {...},
+  body        = <bytes>
+)
+```
+
+## Message Properties
+
+Core AMQP 0-9-1 message properties (set in the `properties` / `BasicProperties` object):
+
+| Property | Type | Description |
+|---|---|---|
+| `delivery_mode` | 1 or 2 | 1 = transient, **2 = persistent** (survives restart on durable queues) |
+| `content_type` | string | MIME type (e.g. `application/json`) |
+| `content_encoding` | string | e.g. `gzip` |
+| `message_id` | string | Application-defined unique ID |
+| `correlation_id` | string | RPC correlation |
+| `reply_to` | string | Queue name for RPC replies |
+| `expiration` | string | Per-message TTL in milliseconds (as string) |
+| `priority` | 0–255 | Message priority (requires `x-max-priority` queue) |
+| `timestamp` | timestamp | Unix epoch when message was created |
+| `app_id` | string | Publishing application identifier |
+| `headers` | map | Arbitrary key-value pairs |
+
+## Mandatory Flag and Unroutable Messages
+
+`mandatory = true` causes the broker to return an unroutable message to the publisher via `basic.return`. Without it, unroutable messages are silently dropped (or go to the alternate exchange if configured).
+
+In most architectures, `mandatory` is not used — instead, use an alternate exchange or ensure topology is declared before publishing.
+
+## Publisher Confirms
+
+Publisher confirms are the mechanism for reliable publishing. Enable on a channel with `confirm.select`, then every `basic.publish` receives either:
+- `basic.ack(delivery_tag)` — message was successfully routed and (for quorum queues) written to a quorum of replicas
+- `basic.nack(delivery_tag)` — message could not be processed
+
+For quorum queues, acks are only issued after Raft consensus — the ack means the message is durable on a majority of replicas.
+
+Always use publisher confirms in production. Fire-and-forget publishing loses messages on broker restart, memory pressure, or network failure.
+
+## Publishing Rate and Flow Control
+
+If publishers produce faster than consumers can consume, queues grow and memory/disk alarms activate. RabbitMQ applies backpressure to publishers by blocking their connections. The `connection.blocked` notification is sent; publishers should monitor for this and pause.
+
+See the [Flow Control](https://www.rabbitmq.com/docs/flow-control) guide for details on memory and disk watermark thresholds.
+
+## Batch Publishing
+
+Multiple messages can be published before waiting for confirms (batching). Track delivery tags and correlate with acks/nacks. Larger batches improve throughput at the cost of more messages to replay on nack.
+
+## AceMQ Take
+
+**Publisher confirms are non-negotiable for production.** Fire-and-forget publishing looks fine in tests but loses messages silently under load, on failover, or during memory alarms. Enable confirms from day one.
+
+**Always set `delivery_mode: 2` for business-critical messages.** Transient messages (delivery_mode=1) are never written to disk and are lost on broker restart. This must be a deliberate choice, not a default.
+
+**Set `content_type` and `message_id`.** `content_type` enables consumer-side deserialization without out-of-band coordination. `message_id` enables idempotency checks and deduplication in consumers. Both cost nothing to set.
+
+**Handle `connection.blocked` in publishers.** When the broker sends `connection.blocked`, pause publishing. Continuing to publish against a blocked connection wastes client-side buffer and delays recovery. Most client libraries surface a callback for this — wire it to a backpressure signal in your application.

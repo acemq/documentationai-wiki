@@ -1,0 +1,85 @@
+---
+title: Classic Queues
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Classic Queues](https://www.rabbitmq.com/docs/classic-queues)
+
+Classic queues are the original RabbitMQ queue type. They are non-replicated by default — a classic queue lives on a single node. Classic queue mirroring (HA queues) was removed in RabbitMQ 4.0.
+
+**For new workloads requiring durability or replication, use quorum queues.** Classic queues remain valid for transient, non-critical, or latency-sensitive workloads.
+
+## When to Use Classic Queues
+
+- **Transient queues** — exclusive, server-named, short-lived (RPC reply queues, per-session state)
+- **Lowest latency** — Raft round-trip is not acceptable (e.g. sub-millisecond response path)
+- **Non-critical data** — data where occasional loss is acceptable (metrics, telemetry)
+- **High churn** — frequently created and deleted queues
+
+## Declaring a Classic Queue
+
+```java
+// Explicit classic type
+Map<String, Object> args = new HashMap<>();
+args.put("x-queue-type", "classic");
+channel.queueDeclare("my-classic-queue", true, false, false, args);
+
+// Or no x-queue-type arg (defaults to classic unless DQT configured)
+channel.queueDeclare("my-classic-queue", true, false, false, null);
+```
+
+## Classic Queue v2 (CQv2)
+
+RabbitMQ 3.12+ uses Classic Queue v2 (CQv2) by default — a rewritten storage backend with improved performance and lower memory usage. CQv1 is deprecated and removed in RabbitMQ 4.0.
+
+CQv2 improvements:
+- Better paging to disk under memory pressure
+- Lower per-message RAM overhead
+- More predictable GC behavior
+
+## Lazy Queues
+
+Lazy mode pages messages to disk as soon as possible, minimizing RAM usage at the cost of higher disk I/O. Useful for queues that accumulate large backlogs.
+
+Enable via policy:
+```bash
+rabbitmqctl set_policy lazy-queues ".*" '{"queue-mode": "lazy"}' --apply-to classic_queues
+```
+
+With CQv2, lazy mode is essentially the default behavior — the distinction is less significant than in CQv1.
+
+## Message Storage
+
+Classic queues store messages in memory when possible and page to disk under memory pressure. Persistent messages (`delivery_mode=2`) are always written to disk but also cached in RAM.
+
+**Memory watermarks** trigger paging. When the broker hits the high-watermark (default 40% of RAM), it starts paging classic queue messages to disk and eventually blocks publishers.
+
+## Priority Queues
+
+Classic queues support priorities via `x-max-priority`:
+```java
+args.put("x-max-priority", 10);  // 1-10 priority levels
+```
+
+Higher-priority messages are delivered first. Quorum queues also support strict priorities but via a different mechanism.
+
+## Migration to Quorum Queues
+
+Since classic queue mirroring was removed in 4.0, existing users of HA (mirrored) queues must migrate to quorum queues. The upstream guide provides detailed migration steps — key points:
+
+1. Ensure all stable feature flags are enabled before upgrading
+2. Drain the classic queue before migrating (or use Shovel to move messages)
+3. Delete the classic queue and redeclare as quorum
+4. Update any client code that set `x-ha-policy` (now ignored)
+
+## AceMQ Take
+
+**Classic queues have a narrowing use case.** With mirroring removed in 4.0, the only reasons to use classic queues are transient/exclusive use cases and extreme latency requirements. Default to quorum queues for everything else.
+
+**Audit your classic queue inventory.** If you're running RabbitMQ 3.x and planning an upgrade to 4.x, identify all HA (mirrored) classic queues now. Each one needs a migration plan — quorum queue migration requires a window where the queue can be drained and recreated.
+
+**Don't mix CQv1 and CQv2 assumptions.** If you're upgrading from a cluster that used CQv1 and relied on its specific memory behavior, revalidate your memory alarm thresholds and queue depth assumptions after upgrading to CQv2.

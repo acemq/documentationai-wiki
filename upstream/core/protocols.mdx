@@ -1,0 +1,82 @@
+---
+title: Supported Protocols
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Which Protocols Does RabbitMQ Support?](https://www.rabbitmq.com/docs/protocols)
+
+RabbitMQ is protocol-agnostic at its core — it ships with native support for several messaging protocols and can be extended via plugins.
+
+## Protocol Summary
+
+| Protocol | Port | Status | Best For |
+|---|---|---|---|
+| **AMQP 0-9-1** | 5672 / 5671 (TLS) | Core, native | Most workloads; richest RabbitMQ feature set |
+| **AMQP 1.0** | 5672 / 5671 (TLS) | Core since 4.0 | ISO standard; interop with Azure Service Bus, ActiveMQ |
+| **MQTT 3.1 / 3.1.1 / 5.0** | 1883 / 8883 (TLS) | Plugin | IoT and mobile devices; pub/sub only |
+| **STOMP** | 61613 | Plugin | Simple text-based; easy to test via telnet |
+| **RabbitMQ Streams** | 5552 / 5551 (TLS) | Plugin | Very high throughput; replay / fan-out |
+| **HTTP (Management API)** | 15672 | Plugin | Admin, diagnostics, low-volume messaging |
+| **WebSocket** | — | Via AMQP 1.0/MQTT/STOMP plugins | Browser clients |
+
+## AMQP 0-9-1
+
+The original RabbitMQ protocol. Provides the full feature set: exchanges, bindings, queues, publisher confirms, consumer acks, transactions, QoS, headers. The largest ecosystem of client libraries across every major language.
+
+RabbitMQ extends the spec with: publisher confirms, per-message TTL, dead-lettering, priority queues, alternate exchanges, and more.
+
+## AMQP 1.0
+
+A fundamentally different wire protocol despite sharing the "AMQP" name. AMQP 1.0 is an ISO/OASIS standard (ISO/IEC 19464) and became a core protocol in RabbitMQ 4.0.
+
+Key differences from AMQP 0-9-1:
+- No built-in exchanges or bindings (broker-topology-agnostic)
+- Link-based flow control (vs. channel QoS)
+- More complex to implement; fewer client libraries
+- Better interoperability with other brokers (Azure Service Bus, Apache Qpid, ActiveMQ, IBM MQ)
+
+## RabbitMQ Streams Protocol
+
+A custom binary protocol for communicating with [Streams](https://www.rabbitmq.com/docs/streams) at very high throughput. Unlike AMQP, the streams protocol supports:
+- Offset-based consumption (like Kafka consumer groups)
+- Multiple simultaneous connections to different nodes
+- Sub-millisecond publish latency at high throughput
+
+Use the streams protocol when throughput and replay matter more than routing flexibility.
+
+## MQTT
+
+A lightweight pub/sub protocol popular for IoT, mobile, and constrained devices. RabbitMQ's native MQTT plugin (since 3.x) supports MQTT 3.1, 3.1.1, and 5.0. MQTT topics map to AMQP routing keys; QoS 1 messages are stored in durable queues.
+
+MQTT QoS levels:
+- **QoS 0** — fire and forget
+- **QoS 1** — at-least-once (publisher confirms)
+- **QoS 2** — exactly-once (two-phase delivery; supported by RabbitMQ MQTT 5.0)
+
+## STOMP
+
+A simple text-based protocol. Easy to debug (telnet-testable) but lower performance than binary protocols. RabbitMQ proxies STOMP over AMQP 0-9-1 internally. Useful for:
+- Legacy systems
+- Testing / debugging
+- Environments with STOMP client libraries but no AMQP support
+
+## WebSocket
+
+Browser clients can use any of these over WebSocket:
+- AMQP 1.0 over WebSocket (recommended)
+- MQTT over WebSocket (Web MQTT plugin)
+- STOMP over WebSocket (Web STOMP plugin)
+
+## AceMQ Take
+
+**Default to AMQP 0-9-1 for server-to-server.** It has the widest client library support, the richest RabbitMQ feature set, and the most operational tooling. Use other protocols only when there's a specific reason (device constraints, protocol interop, legacy systems).
+
+**Use Streams protocol for high-throughput fan-out.** If you need Kafka-like semantics (replay, offset tracking, high fan-out, millions of messages/sec), use the Streams protocol against a Stream queue. AMQP 0-9-1 can also talk to streams but with some feature limitations.
+
+**MQTT for IoT edge devices.** Any device that's battery-constrained, bandwidth-limited, or running an embedded OS should use MQTT. Map QoS 1 → at-least-once delivery; use durable MQTT subscriptions for offline devices.
+
+**Don't use the HTTP API for normal message flow.** The management HTTP API is for admin operations and diagnostics. For messaging, use a protocol client. The HTTP path has higher overhead and no built-in flow control or confirms.

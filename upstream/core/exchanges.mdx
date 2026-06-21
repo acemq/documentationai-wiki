@@ -1,0 +1,89 @@
+---
+title: Exchanges
+section: "## — Upstream Reference"
+layer: L1
+audience: [developer, sre, architect]
+rabbitmq_versions: "3.13 – 4.x"
+last_reviewed: 2026-06
+---
+
+🐇 **Upstream reference:** [Exchanges](https://www.rabbitmq.com/docs/exchanges)
+
+In AMQP 0-9-1, exchanges are message routing tables. Publishers send to exchanges; exchanges route messages to queues, streams, or other exchanges based on their type and bindings.
+
+Every exchange belongs to a virtual host. System exchanges (`amq.*`) are pre-declared in every vhost.
+
+## Exchange Types
+
+| Type | Routing Logic |
+|---|---|
+| **Fanout** | Copy to every bound queue/stream — routing key ignored |
+| **Topic** | Pattern match on routing key segments separated by `.`; `*` = one segment, `#` = zero or more |
+| **Direct** | Exact routing key match |
+| **Default** | Special built-in direct exchange; every queue is auto-bound using its own name as routing key |
+| **Headers** | Match on message header values instead of routing key |
+
+Additional types via plugins: Local Random, Modulus Hash, Consistent Hash, JMS Topic, Recent History, Random.
+
+### Default Exchange
+
+The default exchange is a pre-declared direct exchange named `""` (empty string) in AMQP 0-9-1 clients. Every queue is automatically bound to it with its name as the routing key — this lets publishers send "directly" to a queue by name without an explicit binding. Don't create custom bindings on the default exchange; declare a named direct exchange instead.
+
+### Topic Routing Examples
+
+```
+Pattern: "regions.na.cities.*"  matches: "regions.na.cities.toronto"  (not "regions.na.cities")
+Pattern: "audit.events.#"      matches: "audit.events", "audit.events.users.signup"
+Pattern: "#"                   matches everything (topic acts like fanout for this binding)
+```
+
+## Bindings
+
+An exchange is initially an empty routing table. **Bindings** add routing rules:
+
+- Source exchange name
+- Destination: queue, stream, or another exchange
+- Routing key (or header args for headers exchange)
+
+### Binding Durability
+
+Bindings inherit durability from their source and destination. Semi-durable (durable exchange → transient queue) and fully transient bindings will be removed in future RabbitMQ 4.x releases. Use durable queues and streams to avoid this.
+
+## Exchange Properties
+
+- **Durable** — exchange definition survives restart. Use durable exchanges always; transient exchanges are unsupported in Khepri (RabbitMQ 4.x metadata store).
+- **Auto-delete** — deleted when its last binding is removed (must have had at least one binding).
+- **Optional arguments** — e.g. `alternate-exchange`, header exchange config. Set via policies where possible.
+
+### Policy vs. x-argument Precedence
+
+Client `x-arguments` take precedence over user policies. **Operator policies** override both. For numerical limits, the lower value wins between operator policy and client/user values.
+
+## Exchange-to-Exchange Bindings (E2E)
+
+RabbitMQ extends AMQP 0-9-1 with exchange-to-exchange bindings. A source exchange routes messages to a destination exchange, which then routes them further. Routing happens once using the union of all bindings — messages are not re-published, so the destination exchange's ingress metric won't increment. Metrics on final target queues/streams are accurate.
+
+E2E is useful for:
+- Topology fan-out (one source, multiple typed downstream exchanges)
+- DLX fan-out patterns
+- Topology migration (add a new destination without changing publishers)
+
+## Alternate Exchanges
+
+An alternate exchange receives messages that couldn't be routed by their original exchange (no matching binding). Useful for capturing unroutable messages during topology migrations or for audit/dead-letter purposes.
+
+## System Exchanges
+
+- `amq.rabbitmq.log` — opt-in log fan-out (topic)
+- `amq.rabbitmq.event` — internal event bus (topic)
+- `amq.rabbitmq.trace` — message tracing firehose
+
+## AceMQ Take
+
+**Always use durable exchanges.** Transient exchanges are deprecated in the 4.x series. Even for short-lived workloads, declaring durable exchanges is a no-cost safety net.
+
+**Topic exchanges for event-driven topologies.** Use dotted-segment routing keys like `service.entity.verb` (e.g. `orders.payment.captured`). This lets you add new subscribers without changing publishers — just add a binding with the right pattern.
+
+**E2E for DLX fan-out.** When multiple teams need to consume from a DLX, bind their consumer queues to a fanout exchange that's the DLX target. No consumer code change needed to add a new DLX subscriber.
+
+**Alternate exchanges for unroutable message capture.** In staging and production, wire an alternate exchange on your main topic exchanges to catch misconfigured routing keys before they silently drop messages.
