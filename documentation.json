@@ -954,5 +954,8 @@
     "robots:follow": false,
     "sitemap:enabled": false,
     "llms-txt:enabled": false
+  },
+  "ai": {
+    "page-actions": []
   }
 }
