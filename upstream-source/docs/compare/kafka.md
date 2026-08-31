@@ -876,7 +876,7 @@ dates to that here.
   Schema Registry are vendor products rather than Apache Kafka components.
   RabbitMQ has a [Spark connector](/blog/2026/04/23/rabbitmq-4.3-release#apache-spark-connector)
   in VMware Tanzu RabbitMQ, and [Shovel](../shovel) and [Federation](../federation) for
-  broker-to-broker movement, but this is currently not approaching Kafka's breadth here.
+  broker-to-broker movement; additionally, components like [VMware Tanzu Data Flow’s pre-packaged application connectors](https://techdocs.broadcom.com/us/en/vmware-tanzu/data-solutions/tanzu-data-flow/2-1/tdf-tanzu/application-pre-packaged-applications.html#stream-applications), [VMware Tanzu Greenplum Streaming Server](https://techdocs.broadcom.com/us/en/vmware-tanzu/data-solutions/tanzu-greenplum-streaming-server/2-3/gp-streaming-server/overview.html), and the [Spring Cloud Stream Schema Registry Server](https://docs.spring.io/spring-cloud-stream/docs/current/reference/html/spring-cloud-stream-schema-registry.html#_schema_registry_server) form part of the VMware Tanzu ecosystem, utilizing RabbitMQ as an event streaming engine.
 * **Kafka Streams.** A Java stream processing library — joins, windows, aggregations, state
   stores, exactly-once — running in your Java application with no separate cluster.
 
@@ -1020,6 +1020,7 @@ After all, one solution is cheaper to operate than two different solutions.
 * [Streams: past, present, and future](https://www.youtube.com/watch?v=i3zB5VDMMV8&list=PLvL2NEhYV4ZsALsESTtvpUSSnB-ut0SRJ&index=5) — RabbitMQ Summit 2023
 * [RabbitMQ Streams — extreme performance with unrivalled flexibility](https://www.youtube.com/watch?v=gbf1_aqVKL0) — VMware Tanzu Webinar 2023
 * [Spring for RabbitMQ Super Streams and SQL filters](https://www.youtube.com/watch?v=lbhGFw1GKQ0) — Spring I/O 2026
+* [RabbitMQ vs Kafka: How to Choose an Event-Streaming Broker](https://blogs.vmware.com/tanzu/rabbitmq-event-streaming-broker/)
 
 :::info
 
