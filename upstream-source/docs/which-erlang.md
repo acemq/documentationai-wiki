@@ -27,25 +27,18 @@ This guide covers Erlang/OTP version requirements, [Erlang version support polic
 a RabbitMQ/Erlang [compatibility matrix](#compatibility-matrix),
 version-specific notes and [ways of provisioning](#erlang-repositories) recent Erlang/OTP releases.
 
-:::warning
-
-Erlang 28 is **only supported for brand new clusters**: upgrades of clusters running RabbitMQ with Khepri on Erlang 27
-to Erlang 28 can run into a known issue that affects mixed-version clusters and thus rolling upgrades.
-
-:::
-
 ## Supported Erlang Version Policy {#supported-version-policy}
-
-The fully supported series is Erlang `27.x`, with `28.x` partially supported (see below).
 
 ### Erlang 29 Support
 
-Erlang 29 is **not supported** by RabbitMQ 4.3.
+Erlang 29 is supported starting with RabbitMQ `4.3.6`. However, currently not all packages list that version
+as supported.
 
 ### Erlang 28 Support
 
-Erlang 28 is **partially supported** by RabbitMQ 4.3.x: upgrades of clusters running Khepri have known issues
-directly related to the breaking changes in Erlang 28 that equally affect Erlang 29.
+Erlang 28 is fully supported starting with RabbitMQ `4.3.6`.
+
+Erlang 28.5 provides support for several Post-Quantum cryptography algorithms.
 
 ### Erlang 27 Support
 
@@ -67,6 +60,31 @@ For RabbitMQ releases that have reached end of life, see [Unsupported Series Com
       <th>Minimum required Erlang/OTP</th>
       <th>Maximum supported Erlang/OTP</th>
       <th>Notes</th>
+    </tr>
+
+    <tr>
+      <td>
+        <ul>
+          <li>4.3.6</li>
+        </ul>
+      </td>
+      <td>
+        <ul>
+          <li>27.0</li>
+        </ul>
+      </td>
+      <td>
+        <ul>
+          <li>28.x</li>
+        </ul>
+      </td>
+      <td>
+        <ul class="notes">
+          <li>
+            Erlang 28.5 provides support for Post-Quantum Cryptography.
+          </li>
+        </ul>
+      </td>
     </tr>
 
     <tr>
