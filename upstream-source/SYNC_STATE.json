@@ -1,7 +1,7 @@
 {
   "upstream_repo": "rabbitmq/rabbitmq-website",
-  "last_synced_commit": "932388ff4d41f55c6a3af034748cb052281ed151",
-  "last_synced_date": "2026-09-28",
+  "last_synced_commit": "5acedd0a65d89a6cdb084bb65b8d03f7800dd352",
+  "last_synced_date": "2026-10-05",
   "docs_path": "upstream-source/docs",
   "sync_workflow": ".github/workflows/sync-upstream.yml"
 }
